@@ -6,12 +6,17 @@ a row is evidence the published site answered, not just that an upload
 finished.
 
 **Build** is the gate's content hash from `dist/build.json`, written by
-`npm run release`. **Node** is the runtime that produced that build, taken from
+`npm run release`. **Tag** is the release those bytes ship as, resolved from git
+when the row is written: the tag whose build inputs are this build's, so a
+deploy logged a couple of commits after the tag still reads `v1.0.0` instead of
+`v1.0.0-2-gabc1234`. A build no tag describes — an untagged branch, an input
+changed since the tag, an uncommitted edit — logs `—`, which is a fact rather
+than a gap. **Node** is the runtime that produced that build, taken from
 the same stamp — so the gate refuses a build made off the pin and the row then
-names the version it was made on. Rows logged before the column existed show
-`—`: the runtime of those builds was not recorded, and this log does not invent
-one. **Smoke** is that run's result; every run includes the byte-for-byte
-comparison of the served shell with `dist/client/index.html`.
+names the version it was made on. Rows logged before a column existed show
+`—`: the runtime or the version of those builds was not recorded, and this log
+does not invent one. **Smoke** is that run's result; every run includes the
+byte-for-byte comparison of the served shell with `dist/client/index.html`.
 Environment URLs are in [README.md](README.md#version-10-hosted).
 
 The **Build status** line above the table is the drift flag: it compares
@@ -23,34 +28,36 @@ logged. `npm run release` refreshes it, so a rebuild shows up immediately as
 
 `npm run release:check` is the CI form. It is read-only and exits non-zero
 when the newest logged build is not `dist/build.json`, when that row does not
-record the Node that built it — a dash where a version belongs — or when the
-status line is missing or stale. A freshly written mismatch line is still a
-failure: an honest warning is not a deployment. The Node rule binds only to the
-row for the current build; the dashes on older rows are history, not drift.
+record the Node that built it — a dash where a version belongs — when that row
+has no tag column at all, or when the status line is missing or stale. A
+freshly written mismatch line is still a failure: an honest warning is not a
+deployment. The Node and tag rules bind only to the row for the current build,
+and a dashed tag on that row passes: a build can ship before any tag names it.
+The dashes on older rows are history, not drift.
 
 > **Build status:** `dist/build.json` is `267de9ddf693`, which matches the newest logged build.
 
-| Deployed (UTC) | Environment | Build | Node | Smoke |
-| --- | --- | --- | --- | --- |
-| 2026-10-25 22:09 | preview | `267de9ddf693` — 1.0.0, built 20:49 | v24.17.0 | 14/14 |
-| 2026-10-25 20:51 | production | `267de9ddf693` — 1.0.0, built 20:49 | v24.17.0 | 14/14 |
-| 2026-10-25 16:54 | production | `307b1cc03a98` — 1.0.0, built 16:54 | v24.17.0 | 14/14 |
-| 2026-10-25 16:54 | preview | `307b1cc03a98` — 1.0.0, built 16:54 | v24.17.0 | 14/14 |
-| 2026-10-25 16:45 | production | `4be18bd0f4be` — 1.0.0, built 16:44 | — | 14/14 |
-| 2026-10-25 16:45 | preview | `4be18bd0f4be` — 1.0.0, built 16:44 | — | 14/14 |
-| 2026-10-25 16:38 | production | `f4aeddfc6962` — 1.0.0, built 16:37 | — | 14/14 |
-| 2026-10-25 16:38 | preview | `f4aeddfc6962` — 1.0.0, built 16:37 | — | 14/14 |
-| 2026-10-25 16:19 | production | `334ffbe307a9` — 1.0.0, built 16:19 | — | 14/14 |
-| 2026-10-25 16:19 | preview | `334ffbe307a9` — 1.0.0, built 16:19 | — | 14/14 |
-| 2026-10-25 05:18 | production | `362b716d12f4` — 1.0.0, built 05:17 | — | 14/14 |
-| 2026-10-25 05:18 | preview | `362b716d12f4` — 1.0.0, built 05:17 | — | 14/14 |
-| 2026-10-25 05:14 | production | `a600b114b0ee` — 1.0.0, built 05:12 | — | 14/14 |
-| 2026-10-25 05:14 | preview | `a600b114b0ee` — 1.0.0, built 05:12 | — | 14/14 |
-| 2026-10-24 21:36 | production | `853089c7ad64` — 1.0.0, built 21:35 | — | 14/14 |
-| 2026-10-24 21:35 | preview | `853089c7ad64` — 1.0.0, built 21:35 | — | 14/14 |
-| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | — | 14/14 |
-| 2026-10-24 21:28 | preview | `935e02c6b357` — 1.0.0, built 21:28 | — | 14/14 |
-| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | — | 14/14 |
+| Deployed (UTC) | Environment | Build | Tag | Node | Smoke |
+| --- | --- | --- | --- | --- | --- |
+| 2026-10-25 22:09 | preview | `267de9ddf693` — 1.0.0, built 20:49 | v1.0.0 | v24.17.0 | 14/14 |
+| 2026-10-25 20:51 | production | `267de9ddf693` — 1.0.0, built 20:49 | v1.0.0 | v24.17.0 | 14/14 |
+| 2026-10-25 16:54 | production | `307b1cc03a98` — 1.0.0, built 16:54 | — | v24.17.0 | 14/14 |
+| 2026-10-25 16:54 | preview | `307b1cc03a98` — 1.0.0, built 16:54 | — | v24.17.0 | 14/14 |
+| 2026-10-25 16:45 | production | `4be18bd0f4be` — 1.0.0, built 16:44 | — | — | 14/14 |
+| 2026-10-25 16:45 | preview | `4be18bd0f4be` — 1.0.0, built 16:44 | — | — | 14/14 |
+| 2026-10-25 16:38 | production | `f4aeddfc6962` — 1.0.0, built 16:37 | — | — | 14/14 |
+| 2026-10-25 16:38 | preview | `f4aeddfc6962` — 1.0.0, built 16:37 | — | — | 14/14 |
+| 2026-10-25 16:19 | production | `334ffbe307a9` — 1.0.0, built 16:19 | — | — | 14/14 |
+| 2026-10-25 16:19 | preview | `334ffbe307a9` — 1.0.0, built 16:19 | — | — | 14/14 |
+| 2026-10-25 05:18 | production | `362b716d12f4` — 1.0.0, built 05:17 | — | — | 14/14 |
+| 2026-10-25 05:18 | preview | `362b716d12f4` — 1.0.0, built 05:17 | — | — | 14/14 |
+| 2026-10-25 05:14 | production | `a600b114b0ee` — 1.0.0, built 05:12 | — | — | 14/14 |
+| 2026-10-25 05:14 | preview | `a600b114b0ee` — 1.0.0, built 05:12 | — | — | 14/14 |
+| 2026-10-24 21:36 | production | `853089c7ad64` — 1.0.0, built 21:35 | — | — | 14/14 |
+| 2026-10-24 21:35 | preview | `853089c7ad64` — 1.0.0, built 21:35 | — | — | 14/14 |
+| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | — | — | 14/14 |
+| 2026-10-24 21:28 | preview | `935e02c6b357` — 1.0.0, built 21:28 | — | — | 14/14 |
+| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | — | — | 14/14 |
 | 2026-10-24 20:31 | preview | served shell `6d49ada3b198`; build stamp not recorded (log started later) | — | 14/14 |
 
 Latest deployment receipts: preview `4a1b4db1-61bd-4d71-b378-c3d79ce2ed35`,

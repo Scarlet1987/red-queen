@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { writeBuildStamp, type Stamp } from '../scripts/build-stamp.ts'
-import { HEADER_ROW, newestBuild, place, refreshStatusFile, RUNTIME_UNKNOWN, rowFor, shortHash, STATUS, statusFor, verifyLog, withStatus } from '../scripts/release-log.ts'
+import {
+  HEADER_ROW,
+  newestBuild,
+  place,
+  refreshStatusFile,
+  resolveTag,
+  RUNTIME_UNKNOWN,
+  rowFor,
+  shortHash,
+  STATUS,
+  statusFor,
+  TAG_UNKNOWN,
+  verifyLog,
+  withStatus,
+} from '../scripts/release-log.ts'
 import type { Check } from '../scripts/smoke.ts'
 
 // The release log is the only durable record of what was published, so the row
@@ -32,7 +47,7 @@ const HEADER = [
   '# Releases',
   '',
   HEADER_ROW,
-  '| --- | --- | --- | --- | --- |',
+  '| --- | --- | --- | --- | --- | --- |',
   '| 2026-10-24 20:31 | preview | served shell `6d49ada3b198` | — | 14/14 |',
   '',
 ].join('\n')
@@ -42,20 +57,25 @@ test('the short hash is the twelve characters after the algorithm', () => {
   assert.equal(shortHash(stamp({ hash: 'sha256:abcdef0123456789' })), 'abcdef012345')
 })
 
-test('a passing run logs time, environment, build, runtime and full result', () => {
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18' })
-  assert.equal(row, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | ${process.version} | 4/4 |`)
+test('a passing run logs time, environment, build, tag, runtime and full result', () => {
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18', tag: 'v1.0.0' })
+  assert.equal(row, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 |`)
+})
+
+test('a build no tag describes logs a dash rather than a guessed version', () => {
+  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18' })
+  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${TAG_UNKNOWN} | ${process.version} | 4/4 |`)
 })
 
 test('a stamp without a runtime logs a dash rather than the node running the tool', () => {
-  const row = rowFor({ environment: 'preview', stamp: stamp({ node: '' }), checks: checks(), at: '2026-10-24 21:18' })
-  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${RUNTIME_UNKNOWN} | 4/4 |`)
+  const row = rowFor({ environment: 'preview', stamp: stamp({ node: '' }), checks: checks(), at: '2026-10-24 21:18', tag: 'v1.0.0' })
+  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${RUNTIME_UNKNOWN} | 4/4 |`)
   assert.ok(!row.includes(process.version), 'the Node that ran release:log is not the build runtime')
 })
 
 test('a failing run names the checks that failed', () => {
-  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(['health', 'deployment']), at: '2026-10-24 22:05' })
-  assert.equal(row, `| 2026-10-24 22:05 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${process.version} | 2/4 — failed: deployment, health |`)
+  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(['health', 'deployment']), at: '2026-10-24 22:05', tag: 'v1.0.0' })
+  assert.equal(row, `| 2026-10-24 22:05 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 2/4 — failed: deployment, health |`)
 })
 
 test('a new deployment goes directly under the header', () => {
@@ -66,7 +86,7 @@ test('a new deployment goes directly under the header', () => {
     '# Releases',
     '',
     HEADER_ROW,
-    '| --- | --- | --- | --- | --- |',
+    '| --- | --- | --- | --- | --- | --- |',
     row,
     '| 2026-10-24 20:31 | preview | served shell `6d49ada3b198` | — | 14/14 |',
     '',
@@ -76,16 +96,16 @@ test('a new deployment goes directly under the header', () => {
 test('re-checking a logged build updates its row and keeps the deployment time', () => {
   const logged = [
     HEADER_ROW,
-    '| --- | --- | --- | --- | --- |',
-    '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | v24.17.0 | 13/14 — failed: health |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 13/14 — failed: health |',
     '',
   ].join('\n')
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 22:40' })
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 22:40', tag: 'v1.0.0' })
   const result = place(logged, row, 'production', '429051402764')
   assert.equal(result.replaced, true)
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 1)
   const dataRow = result.markdown.split('\n').find((line) => line.startsWith('| 2026'))
-  assert.equal(dataRow, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | ${process.version} | 4/4 |`)
+  assert.equal(dataRow, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 |`)
 })
 
 test('a row logged before the Node column is still found and gains one', () => {
@@ -95,17 +115,17 @@ test('a row logged before the Node column is still found and gains one', () => {
     '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | 14/14 |',
     '',
   ].join('\n')
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-25 09:00' })
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-25 09:00', tag: 'v1.0.0' })
   const result = place(legacy, row, 'production', '429051402764')
   assert.equal(result.replaced, true, 'an older row is still the same deployment')
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 1)
   const dataRow = result.markdown.split('\n').find((line) => line.startsWith('| 2026'))
-  assert.equal(dataRow, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | ${process.version} | 4/4 |`, 'the row is rewritten in the current shape')
-  assert.equal(dataRow?.split('|').length, 7, 'five cells: time, environment, build, node, smoke')
+  assert.equal(dataRow, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 |`, 'the row is rewritten in the current shape')
+  assert.equal(dataRow?.split('|').length, 8, 'six cells: time, environment, build, tag, node, smoke')
 })
 
 test('the same environment on a different build is a second deployment', () => {
-  const logged = `${HEADER_ROW}\n| --- | --- | --- | --- | --- |\n| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v24.17.0 | 14/14 |\n`
+  const logged = `${HEADER_ROW}\n| --- | --- | --- | --- | --- | --- |\n| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 14/14 |\n`
   const newer = rowFor({ environment: 'production', stamp: stamp({ hash: 'sha256:ffffffffffff0000' }), checks: checks(), at: '2026-10-25 09:00' })
   const result = place(logged, newer, 'production', 'ffffffffffff')
   assert.equal(result.replaced, false)
@@ -121,8 +141,8 @@ const LOGGED = [
   '# Releases',
   '',
   HEADER_ROW,
-  '| --- | --- | --- | --- | --- |',
-  '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | v24.17.0 | 14/14 |',
+  '| --- | --- | --- | --- | --- | --- |',
+  '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | v1.0.0 | v24.17.0 | 14/14 |',
   '| 2026-10-24 20:31 | preview | served shell `6d49ada3b198` | — | 14/14 |',
   '',
 ].join('\n')
@@ -130,7 +150,7 @@ const LOGGED = [
 const current = () => stamp({ hash: 'sha256:935e02c6b3571111111111111111111111111111111111111111111111111111' })
 
 test('the newest logged build is the first row with a build hash', () => {
-  assert.deepEqual(newestBuild(LOGGED), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', node: 'v24.17.0' })
+  assert.deepEqual(newestBuild(LOGGED), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: 'v1.0.0', node: 'v24.17.0' })
   assert.equal(newestBuild(HEADER), null, 'a row naming only a served shell is not a build')
   assert.equal(newestBuild('no table'), null)
 })
@@ -142,7 +162,7 @@ test('a row logged before the Node column reports no runtime', () => {
     '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | 14/14 |',
     '',
   ].join('\n')
-  assert.deepEqual(newestBuild(legacy), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', node: '' })
+  assert.deepEqual(newestBuild(legacy), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: '', node: '' })
 })
 
 test('a current build is reported as matching the newest logged build', () => {
@@ -276,6 +296,27 @@ test('a logged build whose row lost the runtime fails the release check', () => 
   }
 })
 
+test('a current row from before the tag column fails until it is re-logged', () => {
+  const { root, cleanup } = project()
+  try {
+    writeStampFile(root, current())
+    // Five cells: the shape written between the Node column and this one.
+    const older = LOGGED.replace('| v1.0.0 | v24.17.0 |', '| v24.17.0 |')
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(older, current()))
+
+    const verdict = verifyLog(root)
+    assert.equal(verdict.ok, false, 'a row that never names a version is not evidence of one')
+    assert.match(verdict.problems.join('\n'), /does not record the release tag — re-log the deployment/)
+
+    // A dash is an answer, not a gap: a build with no tag still passes.
+    const dashed = LOGGED.replace('| v1.0.0 |', `| ${TAG_UNKNOWN} |`)
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(dashed, current()))
+    assert.deepEqual(verifyLog(root).problems, [])
+  } finally {
+    cleanup()
+  }
+})
+
 test('a legacy row for the current build fails until it is re-logged', () => {
   const { root, cleanup } = project()
   try {
@@ -343,5 +384,74 @@ test('a missing log or a missing build each name the remedy', () => {
     assert.match(verifyLog(root).problems.join('\n'), /no build in dist\/ .* run npm run release/)
   } finally {
     cleanup()
+  }
+})
+
+// A fake repository is the only honest way to test tag resolution: the answer
+// depends on commits, tags and uncommitted edits, not on this checkout.
+function taggedRepo(): { root: string; git: (...args: string[]) => void; cleanup: () => void } {
+  const root = mkdtempSync(join(tmpdir(), 'red-queen-tag-'))
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Red Queen',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
+    GIT_COMMITTER_NAME: 'Red Queen',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+  }
+  const git = (...args: string[]): void => {
+    const result = spawnSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: root, encoding: 'utf8', env, timeout: 20_000 })
+    assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`)
+  }
+  git('init', '-q')
+  return { root, git, cleanup: () => rmSync(root, { recursive: true, force: true }) }
+}
+
+test('the logged tag is the release, not whatever commit the log ran on', () => {
+  const repo = taggedRepo()
+  try {
+    mkdirSync(join(repo.root, 'src'), { recursive: true })
+    writeFileSync(join(repo.root, 'src', 'app.ts'), 'export const a = 1\n')
+    writeFileSync(join(repo.root, 'README.md'), '# app\n')
+    repo.git('add', '.')
+    repo.git('commit', '-qm', 'app')
+    repo.git('tag', '-a', 'v1.0.0', '-m', 'release')
+    assert.equal(resolveTag(repo.root), 'v1.0.0', 'a tagged HEAD is that tag')
+
+    // Documentation, tests and the installer are not build inputs, so the bytes
+    // a clone gets are still the tagged ones and the bare tag is the honest name.
+    writeFileSync(join(repo.root, 'README.md'), '# app, edited\n')
+    repo.git('commit', '-qam', 'docs')
+    assert.equal(resolveTag(repo.root), 'v1.0.0')
+
+    // A changed input is a different build: the tag no longer describes it, and
+    // the described form says exactly how far past the tag this tree is.
+    writeFileSync(join(repo.root, 'src', 'app.ts'), 'export const a = 2\n')
+    repo.git('commit', '-qam', 'code')
+    assert.match(resolveTag(repo.root), /^v1\.0\.0-2-g[0-9a-f]+$/, 'two commits past the tag, which the described form says')
+
+    // An uncommitted edit to an input is not the tagged bytes either.
+    writeFileSync(join(repo.root, 'src', 'app.ts'), 'export const a = 3\n')
+    assert.equal(resolveTag(repo.root), TAG_UNKNOWN)
+  } finally {
+    repo.cleanup()
+  }
+})
+
+test('an untagged repository, and no repository at all, log a dash', () => {
+  const repo = taggedRepo()
+  try {
+    writeFileSync(join(repo.root, 'README.md'), '# app\n')
+    repo.git('add', '.')
+    repo.git('commit', '-qm', 'app')
+    assert.equal(resolveTag(repo.root), TAG_UNKNOWN, 'no tags means no version to name')
+  } finally {
+    repo.cleanup()
+  }
+
+  const bare = mkdtempSync(join(tmpdir(), 'red-queen-nogit-'))
+  try {
+    assert.equal(resolveTag(bare), TAG_UNKNOWN)
+  } finally {
+    rmSync(bare, { recursive: true, force: true })
   }
 })

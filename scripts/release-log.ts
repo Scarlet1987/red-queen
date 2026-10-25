@@ -1,5 +1,5 @@
 // Record a deployment in RELEASES.md: run the live smoke test, then put the
-// build hash, environment and result at the top of the log.
+// build hash, environment, release tag and result at the top of the log.
 //
 //   npm run release:log -- production
 //   npm run release:log -- preview
@@ -12,15 +12,21 @@
 // build that is already logged for that environment is updated in place — its
 // deployment time is kept — instead of being logged twice.
 //
+// The tag is resolved from git, not typed in: it names the release whose build
+// inputs are this build's, so logging a deploy a commit or two after the tag
+// still says `v1.0.0` instead of `v1.0.0-2-gabc1234`. A build no tag describes
+// logs a dash, which is a fact rather than a gap.
+//
 // A status line above the table says whether dist/build.json still matches the
 // newest logged build. The gate refreshes it as part of npm run release, so a
 // rebuild that has not been deployed shows up in the log instead of being
 // mistaken for the published one.
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readStamp, type Stamp } from './build-stamp.ts'
+import { INPUTS, readStamp, type Stamp } from './build-stamp.ts'
 import { DEFAULT_BASE, smoke, type Check } from './smoke.ts'
 
 const ROOT = join(import.meta.dirname, '..')
@@ -41,13 +47,32 @@ export const STATUS = '> **Build status:**'
 /** A row logged before the runtime column existed, or by a stamp that lost it. */
 export const RUNTIME_UNKNOWN = '—'
 
-/** Build, Node, Smoke: the row shape this script writes and reads. */
-const COLUMNS = 5
-export const HEADER_ROW = '| Deployed (UTC) | Environment | Build | Node | Smoke |'
+/**
+ * No tag describes this build: the tree is untagged, has moved past its tag
+ * with a changed input, or git could not be asked. A dash is a fact here.
+ */
+export const TAG_UNKNOWN = '—'
 
-/** Rows from before the Node column: still valid, still found, never rewritten. */
+/** Deployed, Environment, Build, Tag, Node, Smoke: the shape written now. */
+const COLUMNS = 6
+export const HEADER_ROW = '| Deployed (UTC) | Environment | Build | Tag | Node | Smoke |'
+
+/**
+ * A row keeps the shape it was written in; a missing column is filled in when
+ * that deployment is logged again, never by rewriting history. Six cells is
+ * current, five predates the tag, four also predates the Node.
+ */
+const SHAPES = [COLUMNS, COLUMNS - 1, COLUMNS - 2]
+
 function isReleaseRow(parts: string[]): boolean {
-  return parts.length === COLUMNS || parts.length === COLUMNS - 1
+  return SHAPES.includes(parts.length)
+}
+
+/** Where the Node sits depends on the shape of the row it is in. */
+function nodeCell(parts: string[]): string {
+  if (parts.length === COLUMNS) return parts[4]
+  if (parts.length === COLUMNS - 1) return parts[3]
+  return ''
 }
 
 /** UTC, minute precision: "2026-10-24 21:18". */
@@ -59,6 +84,44 @@ export function shortHash(stamp: Stamp): string {
   return stamp.hash.replace(/^sha256:/, '').slice(0, 12)
 }
 
+/**
+ * One git call, with every way it can fail folded into `ok: false`: git absent,
+ * killed for hanging past the timeout, or exiting non-zero. A log row is not
+ * worth crashing a release over.
+ */
+function git(root: string, args: string[]): { ok: boolean; out: string } {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', timeout: 15_000 })
+  if (result.error) return { ok: false, out: '' }
+  return { ok: result.status === 0, out: (result.stdout ?? '').trim() }
+}
+
+/**
+ * Which release this build ships as. The tag, not the commit: a deployment
+ * logged two commits after the tag — documentation, tests, the installer — is
+ * still the tagged bytes, so the bare tag is the honest answer rather than
+ * `v1.0.0-2-gabc1234`. Anything else (no tag, a tree past its tag with a changed
+ * build input, an uncommitted edit, no git) is a dash instead of a guess.
+ */
+export function resolveTag(root: string = ROOT): string {
+  if (!git(root, ['rev-parse', '--git-dir']).ok) return TAG_UNKNOWN
+  const described = git(root, ['describe', '--tags'])
+  if (!described.ok) return TAG_UNKNOWN
+
+  // Uncommitted changes to an input mean these are not the tagged bytes, even
+  // when HEAD is the tagged commit.
+  const dirty = git(root, ['status', '--porcelain', '--', ...INPUTS])
+  if (!dirty.ok || dirty.out !== '') return TAG_UNKNOWN
+
+  const distance = described.out.match(/^(.*)-(\d+)-g([0-9a-f]+)$/)
+  if (!distance) return described.out
+
+  // Past the tag: only a tag whose inputs are untouched produced this build, and
+  // the stamp hashes exactly those inputs. One diff answers it, without copying
+  // the tree or rebuilding it.
+  const unchanged = git(root, ['diff', '--quiet', `refs/tags/${distance[1]}`, 'HEAD', '--', ...INPUTS])
+  return unchanged.ok ? distance[1] : described.out
+}
+
 function cells(line: string): string[] {
   return line
     .split('|')
@@ -67,7 +130,7 @@ function cells(line: string): string[] {
 }
 
 /** One Markdown table row, or a readable result when checks failed. */
-export function rowFor(input: { environment: Environment; stamp: Stamp; checks: Check[]; at?: string }): string {
+export function rowFor(input: { environment: Environment; stamp: Stamp; checks: Check[]; at?: string; tag?: string }): string {
   const failed = input.checks.filter((check) => !check.ok)
   const total = input.checks.length
   const result = failed.length === 0 ? `${total}/${total}` : `${total - failed.length}/${total} — failed: ${failed.map((check) => check.name).join(', ')}`
@@ -75,7 +138,10 @@ export function rowFor(input: { environment: Environment; stamp: Stamp; checks: 
   // The stamp is written by the build itself, so this is the Node that produced
   // these bytes — not whichever Node happens to run this script.
   const node = input.stamp.node || RUNTIME_UNKNOWN
-  return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${node} | ${result} |`
+  // The tag describes the build, so a caller that knows it may pass it in; the
+  // log command resolves it from git instead of trusting the operator's memory.
+  const tag = input.tag ?? TAG_UNKNOWN
+  return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${tag} | ${node} | ${result} |`
 }
 
 export interface Placed {
@@ -116,6 +182,12 @@ export interface NewestBuild {
   environment: string
   at: string
   /**
+   * The tag cell as written: a tag name, or `—` when no tag describes the
+   * build. Empty only when the row predates the column, which the release
+   * check treats as something to re-log rather than as a build with no tag.
+   */
+  tag: string
+  /**
    * The Node cell as logged, or empty when the row records none: a row written
    * before the column, or a dash written by a stamp that had no runtime.
    */
@@ -134,8 +206,9 @@ export function newestBuild(markdown: string): NewestBuild | null {
     if (!isReleaseRow(parts)) continue
     const match = parts[2].match(/`([0-9a-f]{6,64})` — /)
     if (!match) continue
-    const node = parts.length === COLUMNS ? parts[3] : ''
-    return { short: match[1], environment: parts[1], at: parts[0], node: node === RUNTIME_UNKNOWN ? '' : node }
+    const tag = parts.length === COLUMNS ? parts[3] : ''
+    const node = nodeCell(parts)
+    return { short: match[1], environment: parts[1], at: parts[0], tag, node: node === RUNTIME_UNKNOWN ? '' : node }
   }
   return null
 }
@@ -222,6 +295,14 @@ export function verifyLog(root: string = ROOT, file?: string): VerifyResult {
       `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) does not record the Node that built it — re-log the deployment to fill the column.`,
     )
   }
+  // The tag column has to be there for the current build too. A dash passes —
+  // plenty of builds ship before any tag exists — but a row from before the
+  // column, or one someone trimmed, says nothing about what version shipped.
+  if (build && newest && newest.short === build && !newest.tag) {
+    problems.push(
+      `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) does not record the release tag — re-log the deployment to fill the column.`,
+    )
+  }
 
   const line = markdown.split('\n').find((entry) => entry.startsWith(STATUS))
   if (!line) problems.push('the build status line is missing — run npm run release:log -- --status.')
@@ -235,6 +316,8 @@ export interface RecordInput {
   url?: string
   at?: string
   file?: string
+  /** Resolved from git when omitted; a test can name one instead. */
+  tag?: string
 }
 
 export interface RecordResult {
@@ -260,7 +343,7 @@ export async function record(input: RecordInput): Promise<RecordResult> {
   const url = input.url ?? URLS[input.environment]
   const logPath = resolve(input.file ?? LOG_PATH)
   const checks = await smoke(url)
-  const row = rowFor({ environment: input.environment, stamp, checks, at: input.at })
+  const row = rowFor({ environment: input.environment, stamp, checks, at: input.at, tag: input.tag ?? resolveTag(ROOT) })
   const placed = place(readFileSync(logPath, 'utf8'), row, input.environment, shortHash(stamp))
   writeFileSync(logPath, withStatus(placed.markdown, stamp))
 
@@ -291,6 +374,7 @@ if (invokedDirectly) {
     console.log(`  newest  ${verdict.newest ? `${verdict.newest.short} (${verdict.newest.environment}, ${verdict.newest.at})` : 'none'}`)
     // The runtime the deployment was logged with, not the one running this check.
     if (verdict.newest) console.log(`  runtime ${verdict.newest.node || 'not recorded'}`)
+    if (verdict.newest) console.log(`  tag     ${verdict.newest.tag || 'not recorded'}`)
     console.log('')
     if (verdict.ok) {
       console.log(`  ok      ${verdict.status.replace(`${STATUS} `, '')}`)

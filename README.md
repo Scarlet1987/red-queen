@@ -458,10 +458,16 @@ release checks:
   safe instruction.
 
 - **The release log** — a row carries the environment, the short build hash,
-  the version and build time, the Node that produced the build (from the same
-  stamp the gate checks, never the one running the log command), and either
-  `14/14` or the names of the checks that failed; a build whose stamp cannot
-  name its runtime logs `—` instead. A new build is inserted directly under the
+  the version and build time, the release tag those bytes ship as, the Node that
+  produced the build (from the same stamp the gate checks, never the one running
+  the log command), and either `14/14` or the names of the checks that failed; a
+  build whose stamp cannot name its runtime logs `—` instead. The tag comes from
+  git rather than from typing: the tag whose build inputs are this build's, so
+  logging a deploy two commits after the tag still writes `v1.0.0` instead of
+  `v1.0.0-2-gabc1234`, and a tree past its tag with a changed input keeps the
+  described form. A test walks a throwaway repository through all of it —
+  tagged, docs-only commit, code commit, uncommitted edit, no tags, no
+  repository — because that answer depends on git, not on the checkout. A new build is inserted directly under the
   header, a different build for the same environment becomes a second row, a
   row from before the Node column is still matched and rewritten in the current
   shape, and re-checking a logged build updates its row while keeping the
@@ -567,7 +573,7 @@ silently skipped the latest build fails even though every page answers; the
 failure names both asset bundles. `npm run smoke -- https://…` checks another
 deployment; a 503 is reported as a hosting pause, not an app failure. What was
 deployed and how it answered is logged in [RELEASES.md](RELEASES.md) — build
-hash, environment and smoke result, one row per deployment, written by
+hash, release tag, environment and smoke result, one row per deployment, written by
 `npm run release:log -- <environment>`. A status line above the table compares
 `dist/build.json` with the newest logged build, so a local build that was never
 deployed is called out in the log instead of being mistaken for the published
