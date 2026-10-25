@@ -1,0 +1,286 @@
+// Live smoke test for the published site. The deploy gate proves what goes up;
+// this proves what came back down.
+//
+//   npm run smoke                                   the published preview
+//   npm run smoke -- https://example.freebuff.page  another deployment
+//   SMOKE_URL=https://... npm run smoke
+//
+// It fetches the shell, every page, the bundle, a cover, /api/health and two
+// real rack exports the way a visitor would, and exits non-zero when the
+// published site does not behave like the release that was just shipped. The
+// served shell must be byte-identical to dist/client/index.html, so a deploy
+// that quietly skipped the latest build fails even though every page answers.
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { bySlug, safetyMeta } from '../src/data/tools.ts'
+
+export const DEFAULT_BASE = 'https://site-66228069b13847cc95a835f233ca293e.freebuff.page'
+
+/** The first slug of each safety level, so a section heading must appear. */
+const SLUGS = ['ghidra', 'radare2', 'frida']
+const ROUTES = ['/directory', '/tool/ghidra', '/rack', '/safety', '/cosg', '/cosg/worksheet']
+const UNKNOWN = 'not-a-catalogue-tool'
+const NOTE = 'Run it in the air-gapped VM, never on the host.'
+const TIMEOUT_MS = 15_000
+
+export interface Check {
+  name: string
+  ok: boolean
+  detail: string
+}
+
+export interface SmokeOptions {
+  fetchImpl?: typeof fetch
+  timeoutMs?: number
+  /** The local build to compare against; defaults to dist/client/index.html. */
+  shellPath?: string
+}
+
+const ROOT = join(import.meta.dirname, '..')
+const BUILD_SHELL = join(ROOT, 'dist', 'client', 'index.html')
+
+function preview(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat ? ` — ${flat.slice(0, 120)}` : ''
+}
+
+/** Assert the status without consuming the body on the path that uses it. */
+async function expectStatus(response: Response, expected: number): Promise<void> {
+  if (response.status === expected) return
+  const body = await response.text().catch(() => '')
+  throw new Error(`expected ${expected}, got ${response.status}${preview(body)}`)
+}
+
+async function expectType(response: Response, fragment: string): Promise<void> {
+  const type = response.headers.get('content-type') ?? ''
+  if (!type.includes(fragment)) throw new Error(`content-type ${type || 'missing'}, expected ${fragment}`)
+}
+
+async function check(name: string, run: () => Promise<string>): Promise<Check> {
+  try {
+    return { name, ok: true, detail: await run() }
+  } catch (error) {
+    return { name, ok: false, detail: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function links(html: string, pattern: RegExp): string[] {
+  return [...html.matchAll(pattern)].map((match) => match[1])
+}
+
+/** The asset filenames a shell references, so a mismatch names its cause. */
+function assetsOf(html: string): string {
+  const names = [
+    ...links(html, /<script[^>]+src="([^"]+\.js)"/g),
+    ...links(html, /<link[^>]+rel="stylesheet"[^>]+href="([^"]+\.css)"/g),
+  ]
+  if (names.length === 0) return 'no bundle'
+  return names.map((name) => name.split('/').pop() ?? name).join(' + ')
+}
+
+function display(path: string): string {
+  const inside = relative(ROOT, path)
+  return inside && !inside.startsWith('..') ? inside : path
+}
+
+/**
+ * Every check the release depends on, as plain data. The CLI prints the list
+ * and turns failures into an exit code; the tests run the same list against a
+ * local fixture, so a check that stops catching drift is caught itself.
+ */
+export async function smoke(base: string = DEFAULT_BASE, options: SmokeOptions = {}): Promise<Check[]> {
+  const root = base.replace(/\/+$/, '')
+  const fetched = options.fetchImpl ?? fetch
+  const call = (path: string, init: RequestInit = {}) =>
+    fetched(new URL(path, `${root}/`).toString(), {
+      ...init,
+      headers: { 'cache-control': 'no-cache', ...init.headers },
+      signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
+    })
+
+  const checks: Check[] = []
+  let html = ''
+
+  checks.push(
+    await check('shell', async () => {
+      const response = await call('/')
+      await expectStatus(response, 200)
+      await expectType(response, 'text/html')
+      html = await response.text()
+      for (const marker of ['<div id="root">', '<title>Red Queen']) {
+        if (!html.includes(marker)) throw new Error(`the served HTML has no ${marker}`)
+      }
+      return `200 · html · ${html.length} bytes`
+    }),
+  )
+
+  checks.push(
+    await check('deployment', async () => {
+      const shellPath = options.shellPath ?? BUILD_SHELL
+      let built = ''
+      try {
+        built = readFileSync(shellPath, 'utf8')
+      } catch {
+        throw new Error(`no local build at ${display(shellPath)} — run npm run release first`)
+      }
+      if (!html) throw new Error('the shell did not load, so there is nothing to compare')
+      const builtHash = createHash('sha256').update(built).digest('hex')
+      const servedHash = createHash('sha256').update(html).digest('hex')
+      if (servedHash !== builtHash) {
+        throw new Error(`the served shell is not this build · local ${assetsOf(built)} · live ${assetsOf(html)}`)
+      }
+      return `identical to ${display(shellPath)} · sha256 ${builtHash.slice(0, 12)}…`
+    }),
+  )
+
+  checks.push(
+    await check('bundle', async () => {
+      const scripts = links(html, /<script[^>]+src="([^"]+\.js)"/g)
+      if (scripts.length === 0) throw new Error(html ? 'the shell loads no JavaScript bundle' : 'the shell did not load')
+      const seen: string[] = []
+      for (const path of scripts.slice(0, 3)) {
+        const response = await call(path)
+        await expectStatus(response, 200)
+        await expectType(response, 'javascript')
+        await response.arrayBuffer()
+        seen.push(`${new URL(path, `${root}/`).pathname} 200`)
+      }
+      return seen.join(' · ')
+    }),
+  )
+
+  checks.push(
+    await check('styles', async () => {
+      const sheets = links(html, /<link[^>]+rel="stylesheet"[^>]+href="([^"]+\.css)"/g)
+      if (sheets.length === 0) throw new Error(html ? 'the shell loads no stylesheet' : 'the shell did not load')
+      const seen: string[] = []
+      for (const path of sheets.slice(0, 3)) {
+        const response = await call(path)
+        await expectStatus(response, 200)
+        await expectType(response, 'text/css')
+        await response.arrayBuffer()
+        seen.push(`${new URL(path, `${root}/`).pathname} 200`)
+      }
+      return seen.join(' · ')
+    }),
+  )
+
+  for (const path of ROUTES) {
+    checks.push(
+      await check(`route ${path}`, async () => {
+        const response = await call(path)
+        await expectStatus(response, 200)
+        await expectType(response, 'text/html')
+        const body = await response.text()
+        if (!body.includes('<div id="root">')) throw new Error('the SPA fallback did not return the app shell')
+        return '200 · html shell'
+      }),
+    )
+  }
+
+  checks.push(
+    await check('cover', async () => {
+      const response = await call('/images/tools/ghidra.svg')
+      await expectStatus(response, 200)
+      await expectType(response, 'image/svg+xml')
+      const body = await response.text()
+      if (!body.includes('<svg')) throw new Error('the cover is not an SVG document')
+      return '200 · image/svg+xml'
+    }),
+  )
+
+  checks.push(
+    await check('health', async () => {
+      const response = await call('/api/health')
+      await expectStatus(response, 200)
+      await expectType(response, 'application/json')
+      const body = (await response.json()) as { ok?: unknown; service?: unknown }
+      if (body.ok !== true || body.service !== 'red-queen') throw new Error(`unexpected body ${JSON.stringify(body)}`)
+      return '200 · { ok: true, service: "red-queen" }'
+    }),
+  )
+
+  checks.push(
+    await check('export', async () => {
+      const picked = SLUGS.map((slug) => bySlug(slug)).filter((tool) => tool !== undefined)
+      if (picked.length !== SLUGS.length) throw new Error('the catalogue no longer has the smoke slugs')
+
+      const response = await call('/api/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ slugs: [...SLUGS, UNKNOWN], refinements: { ghidra: { safety: 'sandbox', note: NOTE } } }),
+      })
+      await expectStatus(response, 200)
+      await expectType(response, 'text/markdown')
+      const markdown = await response.text()
+
+      if (!markdown.startsWith('# Red Queen rack')) throw new Error('the document does not start with the rack heading')
+      if (!markdown.includes(`${picked.length} tools from`)) {
+        throw new Error(`expected ${picked.length} tools listed (the unknown slug dropped)`)
+      }
+      for (const tool of picked) {
+        if (!markdown.includes(`[${tool.name}](`)) throw new Error(`the document is missing ${tool.name}`)
+      }
+      if (!markdown.includes(`## ${safetyMeta.sandbox.label}`)) throw new Error('the safety refinement was ignored')
+      if (!markdown.includes(`Your note: ${NOTE}`)) throw new Error('the refinement note did not reach the document')
+      if (markdown.includes(UNKNOWN)) throw new Error('an unknown slug was echoed into the document')
+      return `200 · markdown · ${picked.length} tools · refinement kept`
+    }),
+  )
+
+  checks.push(
+    await check('export empty', async () => {
+      const response = await call('/api/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ slugs: [] }),
+      })
+      await expectStatus(response, 400)
+      const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+      if (!body || typeof body.error !== 'string') throw new Error('the empty rack was refused without a JSON error')
+      return `400 · "${body.error}"`
+    }),
+  )
+
+  return checks
+}
+
+/** Print the results and return the process exit code. */
+export function report(base: string, results: Check[], elapsedMs: number): number {
+  const width = Math.max(...results.map((result) => result.name.length))
+  const failed = results.filter((result) => !result.ok)
+
+  console.log('Red Queen live smoke test')
+  console.log(`  target  ${base}`)
+  console.log('')
+  for (const result of results) {
+    console.log(`  ${(result.ok ? 'ok' : 'FAIL').padEnd(4)}  ${result.name.padEnd(width)}  ${result.detail}`)
+  }
+  console.log('')
+  console.log(`  ${results.length - failed.length}/${results.length} checks passed in ${(elapsedMs / 1000).toFixed(1)} s`)
+
+  if (failed.length === 0) return 0
+
+  if (failed.some((result) => /got 503/.test(result.detail))) {
+    console.log('  The host answered 503. That is usually a hosting pause rather than the app; retry in a minute.')
+  }
+  console.log('  The published site does not match the release. Do not announce it as live yet.')
+  return 1
+}
+
+const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+
+if (invokedDirectly) {
+  const base = (process.env.SMOKE_URL ?? process.argv.slice(2).find((arg) => !arg.startsWith('-')) ?? DEFAULT_BASE).trim()
+  if (!/^https?:\/\//i.test(base)) {
+    console.error(`Not an http(s) address: ${base}`)
+    process.exitCode = 2
+  } else {
+    const started = performance.now()
+    const results = await smoke(base)
+    process.exitCode = report(base, results, performance.now() - started)
+  }
+}

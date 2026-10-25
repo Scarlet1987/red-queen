@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800" role="img" aria-label="LLDB">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#191111"/>
+      <stop offset="0.62" stop-color="#241416"/>
+      <stop offset="1" stop-color="#120c0c"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#f4e9dd" stroke-opacity="0.045"/>
+    </pattern>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <rect width="600" height="800" fill="url(#grid)"/>
+  <ellipse cx="300" cy="288" rx="264" ry="208" fill="#8e1f28" opacity="0.14"/>
+  <g transform="translate(300 288) scale(0.9375)" fill="none" stroke-width="1.6" stroke-linecap="round"><line x1="-190" y1="0" x2="190" y2="0" stroke="#f4e9dd" opacity="0.3"/><line x1="-138" y1="-10" x2="-138" y2="10" stroke="#f4e9dd" opacity="0.25"/><line x1="-92" y1="-10" x2="-92" y2="10" stroke="#f4e9dd" opacity="0.25"/><line x1="-46" y1="-10" x2="-46" y2="10" stroke="#f4e9dd" opacity="0.25"/><line x1="0" y1="-10" x2="0" y2="10" stroke="#f4e9dd" opacity="0.25"/><line x1="46" y1="-10" x2="46" y2="10" stroke="#f4e9dd" opacity="0.25"/><line x1="92" y1="-10" x2="92" y2="10" stroke="#f4e9dd" opacity="0.25"/><line x1="138" y1="-10" x2="138" y2="10" stroke="#f4e9dd" opacity="0.25"/><path d="M 46 0 l 14 -14 l 14 14 l -14 14 z" fill="#d1503f" stroke="#d1503f" opacity="0.95"/><line x1="60" y1="-14" x2="60" y2="-120" stroke="#d1503f" stroke-dasharray="5 7" opacity="0.6"/><circle cx="60" cy="-120" r="5" fill="#d1503f" stroke="none" opacity="0.9"/></g>
+  <rect x="38.0" y="599" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="136.4" y="659" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="62.6" y="679" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="136.4" y="679" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><text x="40" y="590" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">0f 2c 77 a0 97 16</text><text x="40" y="610" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">de 98 59 a6 ab 07</text><text x="40" y="630" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">5a f0 0d 4b 9a b3</text><text x="40" y="650" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">dc c3 e4 44 37 2e</text><text x="40" y="670" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">76 59 32 e6 4e e5</text><text x="40" y="690" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">e2 8f 93 12 1d 88</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f4e9dd">
+    <text x="40" y="54" font-size="11" letter-spacing="3" opacity="0.5">LLDB</text>
+    <text x="40" y="766" font-size="11" letter-spacing="3" opacity="0.32">RED QUEEN · SAFE RE DIRECTORY</text>
+  </g>
+  <text x="566" y="776" text-anchor="end" font-family="'Instrument Serif', 'Iowan Old Style', Georgia, serif" font-size="150" font-style="italic" fill="#d1503f" opacity="0.16">L</text>
+  <rect x="0" y="0" width="3" height="800" fill="#d1503f" opacity="0.5"/>
+</svg>

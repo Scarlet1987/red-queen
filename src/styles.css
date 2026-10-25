@@ -1,0 +1,129 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource/instrument-serif';
+@import '@fontsource/instrument-serif/400-italic.css';
+
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+
+  --color-bg: #f6f1ea;
+  --color-surface: #fffdf9;
+  --color-surface-2: #efe8de;
+  --color-line: #e5dcd0;
+  --color-line-strong: #d2c7b8;
+  --color-fg: #1c1a17;
+  --color-muted: #6e665c;
+  --color-faint: #9c9389;
+  --color-accent: #a3232b;
+  --color-accent-soft: #f3dfdc;
+
+  /* Safety levels: reading, emulating, attaching. */
+  --color-static: #3d5949;
+  --color-static-soft: #e4ebe2;
+  --color-sandbox: #8a5b23;
+  --color-sandbox-soft: #f3e7d4;
+  --color-live: #a3232b;
+  --color-live-soft: #f3dfdc;
+
+  --radius-control: 14px;
+  --radius-card: 22px;
+  --radius-image: 26px;
+  --radius-dialog: 24px;
+
+  --shadow-soft: 0 1px 2px rgb(28 26 23 / 0.05), 0 12px 40px -16px rgb(28 26 23 / 0.18);
+  --shadow-drawer: 0 0 0 1px rgb(28 26 23 / 0.05), -20px 0 60px -20px rgb(28 26 23 / 0.3);
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    corner-shape: squircle;
+    border-color: var(--color-line);
+  }
+  .round,
+  .round::before,
+  .round::after {
+    corner-shape: round;
+  }
+  html {
+    background: var(--color-bg);
+    color-scheme: light;
+    overscroll-behavior-y: none;
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    letter-spacing: -0.008em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    overflow-x: clip;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-fg) 50%, transparent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  }
+  img {
+    user-select: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@utility font-display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1;
+}
+
+@utility text-balance {
+  text-wrap: balance;
+}
+
+@utility text-pretty {
+  text-wrap: pretty;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Covers are dark specimen cards; the frame holds their proportions while the
+   cover loads, so keep it close to the artwork rather than to the page. */
+@utility image-frame {
+  background: #1a1211;
+  overflow: hidden;
+}
+
+@utility cover-frame {
+  background: #1a1211;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-fg) 8%, transparent);
+}

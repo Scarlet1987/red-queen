@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800" role="img" aria-label="Rizin">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#191111"/>
+      <stop offset="0.62" stop-color="#241416"/>
+      <stop offset="1" stop-color="#120c0c"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#f4e9dd" stroke-opacity="0.045"/>
+    </pattern>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <rect width="600" height="800" fill="url(#grid)"/>
+  <ellipse cx="300" cy="288" rx="264" ry="208" fill="#8e1f28" opacity="0.14"/>
+  <g transform="translate(300 288) scale(0.9375)" fill="none" stroke-width="1.6" stroke-linecap="round"><line x1="-170" y1="-104" x2="-170" y2="104" stroke="#8e1f28" opacity="0.8"/><rect x="-150" y="-90" width="220.5841924250126" height="8" rx="4" stroke="#f4e9dd" opacity="0.22"/><rect x="-136" y="-62" width="128.92424385994673" height="8" rx="4" stroke="#f4e9dd" opacity="0.22"/><rect x="-122" y="-34" width="130.91531336307526" height="8" rx="4" stroke="#f4e9dd" opacity="0.22"/><rect x="-150" y="-6" width="205.19092913717031" height="8" rx="4" stroke="#d1503f" opacity="0.9"/><rect x="-136" y="22" width="112.69302994012833" height="8" rx="4" stroke="#f4e9dd" opacity="0.22"/><rect x="-122" y="50" width="143.03251180797815" height="8" rx="4" stroke="#f4e9dd" opacity="0.22"/><rect x="-150" y="78" width="213.13708193600178" height="8" rx="4" stroke="#f4e9dd" opacity="0.22"/></g>
+  <rect x="136.4" y="579" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="136.4" y="599" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="161.0" y="619" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="161.0" y="639" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="111.8" y="659" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="136.4" y="679" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><text x="40" y="590" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">a3 d8 05 7c 1e 0f</text><text x="40" y="610" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">85 57 a9 56 cd ab</text><text x="40" y="630" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">a2 5e 7b 89 61 6c</text><text x="40" y="650" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">a4 31 30 92 0f 6a</text><text x="40" y="670" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">92 c9 0c fa 46 c0</text><text x="40" y="690" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">8a 5b e7 44 3f 94</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f4e9dd">
+    <text x="40" y="54" font-size="11" letter-spacing="3" opacity="0.5">RIZIN</text>
+    <text x="40" y="766" font-size="11" letter-spacing="3" opacity="0.32">RED QUEEN · SAFE RE DIRECTORY</text>
+  </g>
+  <text x="566" y="776" text-anchor="end" font-family="'Instrument Serif', 'Iowan Old Style', Georgia, serif" font-size="150" font-style="italic" fill="#d1503f" opacity="0.16">R</text>
+  <rect x="0" y="0" width="3" height="800" fill="#d1503f" opacity="0.5"/>
+</svg>

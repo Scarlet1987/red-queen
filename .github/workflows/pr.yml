@@ -1,0 +1,40 @@
+name: PR checks
+
+# What a pull request needs: a quick verdict. Typecheck, the unit suite and the
+# COS-G pass over the tree. Nothing here builds or installs anything.
+#
+# The rest of the release checks are deliberately absent. `npm run build`,
+# `npm run release:check` and tests/slow/ (the install cycle: three modes packed,
+# started and uninstalled) belong to CI on main, where a release actually
+# happens and where the logged build has to match dist/.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same pull request supersedes the run in flight.
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-checks:
+    name: Fast checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Same source of truth as local: .nvmrc.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Check (typecheck, fast tests, COS-G)
+        run: npm run check:fast

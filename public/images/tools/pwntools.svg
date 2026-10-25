@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800" role="img" aria-label="pwntools">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#191111"/>
+      <stop offset="0.62" stop-color="#241416"/>
+      <stop offset="1" stop-color="#120c0c"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#f4e9dd" stroke-opacity="0.045"/>
+    </pattern>
+  </defs>
+  <rect width="600" height="800" fill="url(#bg)"/>
+  <rect width="600" height="800" fill="url(#grid)"/>
+  <ellipse cx="300" cy="288" rx="264" ry="208" fill="#8e1f28" opacity="0.14"/>
+  <g transform="translate(300 288) scale(0.9375)" fill="none" stroke-width="1.6" stroke-linecap="round"><circle cx="-70" cy="60" r="52" stroke="#f4e9dd" opacity="0.18" stroke-dasharray="4 10"/><circle cx="-70" cy="60" r="90" stroke="#d1503f" opacity="0.9" stroke-dasharray="0"/><circle cx="-70" cy="60" r="128" stroke="#f4e9dd" opacity="0.18" stroke-dasharray="4 10"/><circle cx="-70" cy="60" r="166" stroke="#f4e9dd" opacity="0.18" stroke-dasharray="4 10"/><circle cx="-70" cy="60" r="6" fill="#d1503f" stroke="none"/></g>
+  <rect x="136.4" y="659" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><rect x="161.0" y="659" width="16.4" height="13" rx="2" fill="#d1503f" opacity="0.8"/><text x="40" y="590" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">2d 9c 8e 9f 9e 75</text><text x="40" y="610" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">35 2a 08 34 5b 81</text><text x="40" y="630" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">c1 2e 13 3d 1b 84</text><text x="40" y="650" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">cd 76 e4 87 56 5e</text><text x="40" y="670" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">8d fe af a2 4f 56</text><text x="40" y="690" fill="#f4e9dd" opacity="0.3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" letter-spacing="1">2a 75 2d 58 13 65</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#f4e9dd">
+    <text x="40" y="54" font-size="11" letter-spacing="3" opacity="0.5">PWNTOOLS</text>
+    <text x="40" y="766" font-size="11" letter-spacing="3" opacity="0.32">RED QUEEN · SAFE RE DIRECTORY</text>
+  </g>
+  <text x="566" y="776" text-anchor="end" font-family="'Instrument Serif', 'Iowan Old Style', Georgia, serif" font-size="150" font-style="italic" fill="#d1503f" opacity="0.16">P</text>
+  <rect x="0" y="0" width="3" height="800" fill="#d1503f" opacity="0.5"/>
+</svg>

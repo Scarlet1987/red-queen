@@ -1,0 +1,38 @@
+name: CI
+
+# The release gates, run the way a release is: build the tree first, so
+# release:check compares the log against the build those inputs actually
+# produce, then typecheck, the suite, COS-G, and the log/build agreement.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-checks:
+    name: Release checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The version comes from .nvmrc, the same file a local nvm checkout
+          # reads, so CI cannot quietly drift to a different runtime.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Check (typecheck, tests, COS-G)
+        run: npm run check
+
+      - name: Release record matches the build
+        run: npm run release:check
