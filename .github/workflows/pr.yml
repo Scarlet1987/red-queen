@@ -36,5 +36,7 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Check (typecheck, fast tests, COS-G)
+      # Same size gate as main, so growth is flagged on the pull request rather
+      # than discovered on the release.
+      - name: Check (typecheck, fast tests and size gate, COS-G)
         run: npm run check:fast

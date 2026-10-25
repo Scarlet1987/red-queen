@@ -31,7 +31,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Check (typecheck, tests, COS-G)
+      # The 100 MB size gate rides inside the suite: a tree or build that grows
+      # past 90 MB fails here, before it can merge.
+      - name: Check (typecheck, tests and size gate, COS-G)
         run: npm run check
 
       - name: Release record matches the build

@@ -172,9 +172,18 @@ SVG covers, with zero tool binaries. Entries link upstream instead of mirroring
 installers, which is also what keeps the licences honest — and means adding a
 tool costs a few lines of data rather than megabytes.
 
-`npm run size` walks the repository (excluding `node_modules`, `.git`,
-`.freebuff` and `dist`) and the build output, prints a breakdown and headroom,
-flags any file over 5 MB and exits non-zero above the cap.
+That budget is a gate, not a note. `tests/size.test.ts` runs inside `npm test`,
+so `npm run check` and both workflows go red when either number reaches **90 MB**
+— the 100 MB cap less a 10 MB margin, so growth is caught while it is still
+cheap to undo rather than on the day the promise breaks. The base program and
+the build output are measured separately: a small repository that starts packing
+a huge bundle fails exactly as loudly.
+
+`npm run size` is the same rule with a breakdown — bytes per top-level entry,
+both totals, and the headroom left to the gate — and exits non-zero when either
+total reaches it. It also names any single file over 5 MB. The walk skips
+`node_modules`, `.git`, `.wrangler`, `.freebuff` and, for the base figure,
+`dist`; the build figure comes from `dist/` itself.
 
 ## One command
 
@@ -453,7 +462,8 @@ release checks:
   from the catalogue. Deterministic, so nothing changes unless an entry does.
 - `npm run directory` regenerates `DIRECTORY.md` from the same data. Commit it
   alongside catalogue changes so GitHub readers see the same directory.
-- `npm run size` checks the 100 MB budget before you publish.
+- `npm run size` prints the size breakdown against the 100 MB budget. The gate
+  itself lives in `npm test`, so `npm run check` is what actually stops growth.
 - `npm run cosg -- .` runs the COS-G pass over the project itself.
 
 Adding an entry means: a name, a category, a safety level, a licence, its
