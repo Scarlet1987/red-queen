@@ -165,6 +165,18 @@ The harness cannot read or edit project files yet, and the conversation says so
 rather than pretending otherwise. It is the first page you see; the rest of Red
 Queen (directory, rack, safety, COS-G) is untouched.
 
+### Bench test
+
+**Run bench test** on the setup page is the in-app counterpart to `npm run
+smoke`: seven checks that this copy works where it is running — local storage,
+the saved rack and refinements through their validators, the catalogue (38 tools,
+unique slugs, known categories and levels), covers loading as SVG, `POST
+/api/export` returning Markdown with a refinement note kept, `/api/health`, and
+your model endpoint when one is configured. It reads only: the single write is a
+probe key it removes again, and no project folder is touched. Results stay on
+screen with timings, so a test launch can be reported by reading them out — 6 of
+7 passed and 1 skipped is the normal result with no model configured.
+
 ## Size budget
 
 The base program ships under **100 MB**: source, catalogue data and generated

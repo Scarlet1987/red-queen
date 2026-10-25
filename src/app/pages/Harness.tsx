@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowRight, Check, FolderOpen, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { ArrowRight, Check, FolderOpen, Gauge, Minus, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import { Button, Container } from '../components/ui'
+import { runBenchTest, type BenchReport } from '../lib/bench'
 import { cx } from '../lib/cx'
 import { modelPresets, useHarness, type ModelProvider } from '../lib/harness'
 
@@ -248,6 +249,77 @@ function ModelBrowser({ open, onClose }: { open: boolean; onClose: () => void })
   )
 }
 
+// One button, seven checks, the same answer `npm run smoke` gives from outside:
+// does this copy actually work where it is running? Results stay on screen so
+// they can be read out in a bug report.
+function BenchTest({ model }: { model: { label: string; baseUrl: string } | null }) {
+  const [running, setRunning] = useState(false)
+  const [report, setReport] = useState<BenchReport | null>(null)
+
+  async function run() {
+    setRunning(true)
+    try {
+      setReport(await runBenchTest({ model }))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <section className="mt-12 rounded-card border border-line bg-surface p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-lg">
+          <p className="text-[11px] uppercase tracking-[0.12em] text-faint">Bench test</p>
+          <h2 className="font-display mt-1 text-[28px] leading-none">Check this copy</h2>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
+            Storage, saved data, the catalogue, covers, the export endpoint and your model endpoint — checked here, in this browser. Nothing is written and no project file is touched.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => void run()} loading={running}>
+          <Gauge />
+          {report ? 'Run again' : 'Run bench test'}
+        </Button>
+      </div>
+
+      {report && (
+        <div className="mt-5 border-t border-line pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p role="status" className="text-[13.5px] font-medium">
+              {report.passed} of {report.checks.length} passed{report.skipped > 0 ? `, ${report.skipped} skipped` : ''} · {report.ms} ms
+            </p>
+            <button type="button" onClick={() => setReport(null)} className="text-[12.5px] text-muted transition-colors hover:text-fg">
+              Clear
+            </button>
+          </div>
+          <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
+            {report.checks.map((entry) => (
+              <li key={entry.id} className="flex items-start gap-2.5 rounded-[10px] border border-line px-3 py-2">
+                <span
+                  className={cx(
+                    'mt-0.5 grid size-4 shrink-0 place-items-center rounded-full',
+                    entry.outcome === 'pass' ? 'bg-static-soft text-static' : entry.outcome === 'fail' ? 'bg-live-soft text-live' : 'bg-surface-2 text-faint',
+                  )}
+                >
+                  {entry.outcome === 'pass' ? <Check className="size-2.5" /> : entry.outcome === 'fail' ? <X className="size-2.5" /> : <Minus className="size-2.5" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium">{entry.label}</span>
+                  <span className="block text-[12px] leading-relaxed text-muted">{entry.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {report.failed > 0 && (
+            <p className="mt-3 text-[12.5px] leading-relaxed text-accent">
+              {report.failed} check{report.failed === 1 ? '' : 's'} failed. Nothing was changed — reload and run it again, or reinstall this copy before reporting the result.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function Harness() {
   const harness = useHarness()
   const navigate = useNavigate()
@@ -363,6 +435,8 @@ export function Harness() {
           {harness.ready ? 'Model and directory set. The workbench is open.' : 'Add a model and choose a directory to continue.'}
         </p>
       </div>
+
+      <BenchTest model={harness.active ? { label: harness.active.label, baseUrl: harness.active.baseUrl } : null} />
 
       {harness.error && (
         <div className="mt-4 flex items-start justify-between gap-4 rounded-[12px] border border-line bg-surface px-4 py-3 text-[13px] text-accent">

@@ -28,10 +28,11 @@ status line is missing or stale. A freshly written mismatch line is still a
 failure: an honest warning is not a deployment. The Node rule binds only to the
 row for the current build; the dashes on older rows are history, not drift.
 
-> **Build status:** `dist/build.json` is `307b1cc03a98`, which matches the newest logged build.
+> **Build status:** `dist/build.json` is `267de9ddf693`, which matches the newest logged build.
 
 | Deployed (UTC) | Environment | Build | Node | Smoke |
 | --- | --- | --- | --- | --- |
+| 2026-10-25 20:51 | production | `267de9ddf693` — 1.0.0, built 20:49 | v24.17.0 | 14/14 |
 | 2026-10-25 16:54 | production | `307b1cc03a98` — 1.0.0, built 16:54 | v24.17.0 | 14/14 |
 | 2026-10-25 16:54 | preview | `307b1cc03a98` — 1.0.0, built 16:54 | v24.17.0 | 14/14 |
 | 2026-10-25 16:45 | production | `4be18bd0f4be` — 1.0.0, built 16:44 | — | 14/14 |
