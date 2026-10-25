@@ -216,8 +216,10 @@ curl -fsSL … | sh -s -- --mode vm             # arguments go after `--`
 ```
 
 - The clone source is `--repo URL` (or `RED_QUEEN_REPO`), `--source DIR` says
-  where to clone it, `--ref` which branch or tag. Both have defaults; the URL
-  points at the repository this file is published from.
+  where to clone it, `--ref` which branch or tag. All have defaults: the URL
+  points at the repository this file is published from, and the ref is `v1.0.0`
+  — the tagged release — so an install today and one in a month are the same
+  program. `--ref main` follows the branch instead.
 - It is idempotent: run it again and it finds the existing install and starts it
   rather than installing over it — and if the app is already answering on its
   port it just opens it, so a second click cannot start a second copy. That is
@@ -229,7 +231,9 @@ curl -fsSL … | sh -s -- --mode vm             # arguments go after `--`
 
 When the repository is published somewhere other than the default URL above, the
 one line to change is `DEFAULT_REPO` at the top of [install.sh](install.sh);
-then the one-liner follows automatically.
+then the one-liner follows automatically. `DEFAULT_REF` beside it is the version
+the installer pins — bump it when a new release is tagged, or installs keep
+getting the old tag.
 
 ## Install locally (offline)
 
@@ -538,7 +542,7 @@ Red Queen 1.0 is live and needs no install:
 
 Site `1710b6be-1a28-4f44-ba17-420cb5e348b8` on Freebuff Sites; both
 environments are published and serve the same build (shell SHA-256
-`065e4f51…`).
+`0eb3d68a…`).
 A release is `npm run release`, then `sites_deploy` with `manifestPath`
 `dist/deploy.json` for the environment you are updating, then `npm run smoke`
 against that URL (pass it as an argument). There is no committed manifest: the

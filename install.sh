@@ -10,6 +10,10 @@
 # else — it clones the repository first. Then it installs, starts the app and
 # opens it, so one command is the whole thing.
 #
+# A clone takes the tagged release (DEFAULT_REF), not the tip of main, so an
+# install run today and one run next month are the same program. Pass --ref main
+# to follow the branch instead.
+#
 # Options:
 #   --mode metal|sandbox|vm   which install to create (default: metal)
 #   --prefix DIR              where the installs live (default: ~/.red-queen)
@@ -17,7 +21,7 @@
 #                             (default: ~/.red-queen-src)
 #   --repo URL                what to clone (default: RED_QUEEN_REPO or the
 #                             repository above)
-#   --ref REF                 branch or tag to clone (default: main)
+#   --ref REF                 branch or tag to clone (default: v1.0.0)
 #   --no-service              install without the boot-time systemd unit
 #   --no-launch               do not start the app or open a browser
 #
@@ -25,12 +29,13 @@
 set -eu
 
 DEFAULT_REPO=https://github.com/Scarlet1987/red-queen.git
+DEFAULT_REF=v1.0.0
 
 mode=metal
 prefix=${RED_QUEEN_PREFIX:-"$HOME/.red-queen"}
 source_dir=${RED_QUEEN_SRC:-"$HOME/.red-queen-src"}
 repo=${RED_QUEEN_REPO:-$DEFAULT_REPO}
-ref=${RED_QUEEN_REF:-main}
+ref=${RED_QUEEN_REF:-$DEFAULT_REF}
 service=1
 launch=1
 
@@ -52,7 +57,7 @@ Red Queen installer. One command: install from here, or clone and install.
   --prefix DIR              where the installs live (default: ~/.red-queen)
   --source DIR              where to clone when there is no checkout
   --repo URL                what to clone (default: $DEFAULT_REPO)
-  --ref REF                 branch or tag to clone (default: main)
+  --ref REF                 branch or tag to clone (default: $DEFAULT_REF)
   --no-service              install without the boot-time systemd unit
   --no-launch               do not start the app or open a browser
   -h, --help                this text
