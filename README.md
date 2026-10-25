@@ -423,6 +423,16 @@ release checks:
   packaging check that would have caught the deploy manifest pointing at a stale
   Worker.
 
+- **The covers** — `public/images/tools` is generated, so an entry can ship
+  without art and nothing else notices: the card just renders a broken image.
+  The suite closes that. Every catalogue entry must have `<slug>.svg`, any file
+  with no entry is an orphan and fails, each cover must be a real SVG with a
+  `viewBox` rather than a zero-byte placeholder, slugs must be URL-safe (a
+  camel-case or spaced slug 404s on a case-sensitive host), and nothing but
+  SVGs may sit in the directory. Running `npm run covers` reproduces the
+  committed art byte for byte, which is what makes "regenerate and commit" a
+  safe instruction.
+
 - **The release log** — a row carries the environment, the short build hash,
   the version and build time, the Node that produced the build (from the same
   stamp the gate checks, never the one running the log command), and either
