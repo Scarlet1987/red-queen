@@ -394,7 +394,7 @@ the tree you are about to ship rather than yesterday's `dist/`.
 `tests/slow/*.test.ts`; there is no testing framework to install. The one slow
 file is the install cycle, which packs and serves three modes — a pull request
 does not need that, so `npm run test:fast` (and `npm run check:fast`) run only
-the top-level files, five seconds instead of a build. Eight files cover the
+the top-level files, five seconds instead of a build. Nine files cover the
 release checks:
 
 - **Storage validation** — `src/app/lib/validate.ts` is pure and shared by the
@@ -438,6 +438,14 @@ release checks:
   directory and the shared prefix goes only when it is empty. This is the
   packaging check that would have caught the deploy manifest pointing at a stale
   Worker.
+
+- **The installer pin** — `install.sh` clones the tagged release, so the tag it
+  names has to exist on the remote it clones from. The suite reads `DEFAULT_REF`
+  and asks `git ls-remote --tags` about that repository: a pin naming a tag
+  nobody pushed fails, and so does a script that still sets the pin but no longer
+  reads it — otherwise a bump would be documentation. An unreachable remote
+  fails too, because the promise is about a machine that has nothing but a
+  shell. `--ref main` remains available for following the branch on purpose.
 
 - **The covers** — `public/images/tools` is generated, so an entry can ship
   without art and nothing else notices: the card just renders a broken image.
