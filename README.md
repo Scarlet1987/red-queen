@@ -487,6 +487,7 @@ scripts/smoke.ts           post-deploy smoke test of the published site
 scripts/release-log.ts     records a deployment's build hash and smoke result
 scripts/offline-server.mjs dependency-free static + API server
 public/images/             generated covers
+LICENSE                    MIT, for the code, the catalogue text and the covers
 RELEASES.md                deployments, build hashes and smoke results
 .github/workflows/ci.yml   main-branch CI: build, checks, release record
 .github/workflows/pr.yml   pull-request CI: typecheck, fast tests, COS-G
@@ -551,5 +552,24 @@ is what keeps the repository inside its 100 MB budget.
 
 The site itself is a Vite SPA plus a Worker — GitHub Pages can host
 `dist/client` if you drop the `/api` routes (the rack export then needs a
-fallback), otherwise deploy it somewhere that runs the Worker. Add a `LICENSE`
-for the code and say how the catalogue text may be reused before you publish.
+fallback), otherwise deploy it somewhere that runs the Worker.
+
+The repository is published at **https://github.com/Scarlet1987/red-queen**,
+MIT licensed (see below). `install.sh` clones from that URL by default, so the
+one-liner works on a machine that has nothing but a shell.
+
+## Licence
+
+Red Queen's own code, its catalogue text and the generated covers are **MIT**
+licensed — the full text is in [LICENSE](LICENSE). Use it, change it, ship it,
+keep the copyright notice.
+
+That licence covers this program, not the tools it lists. Every catalogue entry
+names its upstream licence and no tool binaries are stored in the repository:
+install and run each tool under its own terms. MIT here means you may reuse the
+directory, the harness and the writing — not that the tools become MIT.
+
+`package.json` deliberately carries no `license` field: it is a hashed build
+input, so adding one would change the build stamp and strand the release record
+until the next deployment. [LICENSE](LICENSE) is the statement of record, and a
+test fails if a field ever appears there and disagrees with it.
