@@ -32,6 +32,7 @@ row for the current build; the dashes on older rows are history, not drift.
 
 | Deployed (UTC) | Environment | Build | Node | Smoke |
 | --- | --- | --- | --- | --- |
+| 2026-10-25 22:09 | preview | `267de9ddf693` — 1.0.0, built 20:49 | v24.17.0 | 14/14 |
 | 2026-10-25 20:51 | production | `267de9ddf693` — 1.0.0, built 20:49 | v24.17.0 | 14/14 |
 | 2026-10-25 16:54 | production | `307b1cc03a98` — 1.0.0, built 16:54 | v24.17.0 | 14/14 |
 | 2026-10-25 16:54 | preview | `307b1cc03a98` — 1.0.0, built 16:54 | v24.17.0 | 14/14 |
