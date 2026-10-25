@@ -39,6 +39,7 @@ interface Entry {
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.wrangler', '.freebuff', '.next', '.svelte-kit', 'vendor'])
 const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
+const DECLARATION = /\.d\.ts$/
 const TEXT_EXT = new Set([...CODE_EXT, '.css', '.json', '.md', '.html', '.yml', '.yaml', '.toml', '.jsonc'])
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 const MAX_FILES = 5000
@@ -248,7 +249,10 @@ for (const entry of files) {
   const text = textOf(entry)
   if (!text) continue
 
-  if (CODE_EXT.has(ext)) {
+  // A declaration file is types only: there is no JavaScript to emit, so asking
+  // the transpiler for output fails outright rather than reporting a syntax
+  // error. Typecheck covers it; the crash, orphan and ghost rules still read it.
+  if (CODE_EXT.has(ext) && !DECLARATION.test(entry.abs)) {
     const result = ts.transpileModule(text, { fileName: entry.abs, reportDiagnostics: true, compilerOptions })
     for (const diagnostic of result.diagnostics ?? []) {
       if (diagnostic.category !== ts.DiagnosticCategory.Error) continue
@@ -322,6 +326,10 @@ const entryPoints = new Set(
 
 for (const entry of files) {
   if (!entry.abs.startsWith(join(root, 'src'))) continue
+  // A declaration file is never imported: tsconfig includes it, and the ambient
+  // globals it declares are found by the compiler. Flagging it as unused would
+  // say the opposite of what is true about how it is used.
+  if (DECLARATION.test(entry.abs)) continue
   if (!CODE_EXT.has(extname(entry.abs)) && extname(entry.abs) !== '.css') continue
   if (entryPoints.has(entry.abs) || imported.has(entry.abs)) continue
   add('O', { rule: 'unused-source', severity: 'warn', message: 'Nothing imports this file from an entry point.', file: entry.rel })

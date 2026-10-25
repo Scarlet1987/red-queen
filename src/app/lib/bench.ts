@@ -135,10 +135,13 @@ async function health(): Promise<BenchCheck> {
   try {
     const response = await fetch('/api/health')
     if (!response.ok) return check(id, label, 'fail', `/api/health answered ${response.status}.`)
-    const body = (await response.json()) as { ok?: unknown; service?: unknown; mode?: unknown }
+    const body = (await response.json()) as { ok?: unknown; service?: unknown; mode?: unknown; version?: unknown; tag?: unknown }
     if (body.ok !== true) return check(id, label, 'fail', 'The health endpoint answered, but not with ok: true.')
     const mode = typeof body.mode === 'string' ? `${body.mode} mode` : 'hosted'
-    return check(id, label, 'pass', `${String(body.service ?? 'red-queen')} · ${mode}`)
+    // The hosted Worker bakes its version and release tag into this answer, so a
+    // bench report says which release is running instead of just "up".
+    const release = [body.version, body.tag].filter((value): value is string => typeof value === 'string' && value !== '')
+    return check(id, label, 'pass', [`${String(body.service ?? 'red-queen')} · ${mode}`, ...release].join(' · '))
   } catch {
     return check(id, label, 'fail', '/api/health did not answer. The app is running without its server.')
   }

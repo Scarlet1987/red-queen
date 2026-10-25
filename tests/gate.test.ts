@@ -32,7 +32,7 @@ function build(root: string, runtime?: string): void {
   mkdirSync(join(root, 'dist', 'client'), { recursive: true })
   writeFileSync(join(root, 'dist', 'red_queen', 'index.js'), 'export default { fetch() {} }\n')
   writeFileSync(join(root, 'dist', 'client', 'index.html'), '<div id="root"></div>\n')
-  writeBuildStamp(root, { version: '1.0.0', compatibilityDate: '2026-09-29', worker: 'red_queen/index.js', assets: 'client' })
+  writeBuildStamp(root, { version: '1.0.0', compatibilityDate: '2026-09-29', worker: 'red_queen/index.js', assets: 'client', tag: 'v1.0.0' })
   if (runtime) stampField(root, 'node', runtime)
 }
 

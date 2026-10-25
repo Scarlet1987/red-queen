@@ -16,8 +16,22 @@ import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { bySlug, safetyMeta } from '../src/data/tools.ts'
+import { readStamp } from './build-stamp.ts'
+import { tagOrNull } from './release-tag.ts'
 
 export const DEFAULT_BASE = 'https://site-66228069b13847cc95a835f233ca293e.freebuff.page'
+
+/** What a deployment should say it is: the version and tag baked into the build. */
+export interface Release {
+  version: string
+  tag: string | null
+}
+
+/** The release dist/ was built as, or null when there is no build to compare with. */
+export function buildRelease(root: string = ROOT): Release | null {
+  const stamp = readStamp(root)
+  return stamp ? { version: stamp.version, tag: tagOrNull(stamp.tag) } : null
+}
 
 /** The first slug of each safety level, so a section heading must appear. */
 const SLUGS = ['ghidra', 'radare2', 'frida']
@@ -37,6 +51,8 @@ export interface SmokeOptions {
   timeoutMs?: number
   /** The local build to compare against; defaults to dist/client/index.html. */
   shellPath?: string
+  /** The release to expect from /api/health; defaults to dist/build.json. */
+  release?: Release
 }
 
 const ROOT = join(import.meta.dirname, '..')
@@ -197,9 +213,28 @@ export async function smoke(base: string = DEFAULT_BASE, options: SmokeOptions =
       const response = await call('/api/health')
       await expectStatus(response, 200)
       await expectType(response, 'application/json')
-      const body = (await response.json()) as { ok?: unknown; service?: unknown }
+      const body = (await response.json()) as { ok?: unknown; service?: unknown; version?: unknown; tag?: unknown }
       if (body.ok !== true || body.service !== 'red-queen') throw new Error(`unexpected body ${JSON.stringify(body)}`)
-      return '200 · { ok: true, service: "red-queen" }'
+
+      // The site is expected to name its own release, so a deployment that is
+      // not this build fails even when every page answers: the nameplate is
+      // baked in at build time, which makes it the cheapest proof of identity.
+      const expected = options.release ?? buildRelease()
+      if (!expected) throw new Error('no local build at dist/build.json — run npm run release first')
+      if (typeof body.version !== 'string' || body.version === '') {
+        throw new Error('the site reports no version — it is serving a Worker built before the release nameplate')
+      }
+      if (body.version !== expected.version) {
+        throw new Error(`the site reports ${body.version}, but this build is ${expected.version} — it is serving a different release`)
+      }
+      if (body.tag !== null && typeof body.tag !== 'string') {
+        throw new Error(`unexpected tag ${JSON.stringify(body.tag)}; expected a tag name or null`)
+      }
+      const served = body.tag ?? null
+      if (served !== expected.tag) {
+        throw new Error(`the site reports ${served ?? 'no tag'}, but this build ships as ${expected.tag ?? 'no tag'} — it is serving a different release`)
+      }
+      return `200 · red-queen ${expected.version} · ${served ?? 'no tag'} — the release this build ships as`
     }),
   )
 

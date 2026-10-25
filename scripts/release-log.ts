@@ -12,22 +12,27 @@
 // build that is already logged for that environment is updated in place — its
 // deployment time is kept — instead of being logged twice.
 //
-// The tag is resolved from git, not typed in: it names the release whose build
-// inputs are this build's, so logging a deploy a commit or two after the tag
-// still says `v1.0.0` instead of `v1.0.0-2-gabc1234`. A build no tag describes
-// logs a dash, which is a fact rather than a gap.
+// The tag names the release the bytes shipped as, so it comes from the stamp:
+// the build baked that tag into /api/health, and a row that disagreed with the
+// site would make the log a second opinion. A stamp old enough to have no tag
+// recorded falls back to git, which names the release whose build inputs are
+// this build's. A build no tag describes logs a dash, which is a fact rather
+// than a gap.
 //
 // A status line above the table says whether dist/build.json still matches the
 // newest logged build. The gate refreshes it as part of npm run release, so a
 // rebuild that has not been deployed shows up in the log instead of being
 // mistaken for the published one.
-import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { INPUTS, readStamp, type Stamp } from './build-stamp.ts'
+import { readStamp, type Stamp } from './build-stamp.ts'
+import { resolveTag, TAG_UNKNOWN } from './release-tag.ts'
 import { DEFAULT_BASE, smoke, type Check } from './smoke.ts'
+
+// Re-exported so the log is still the one place a caller reads a release from.
+export { resolveTag, TAG_UNKNOWN }
 
 const ROOT = join(import.meta.dirname, '..')
 
@@ -46,12 +51,6 @@ export const STATUS = '> **Build status:**'
 
 /** A row logged before the runtime column existed, or by a stamp that lost it. */
 export const RUNTIME_UNKNOWN = '—'
-
-/**
- * No tag describes this build: the tree is untagged, has moved past its tag
- * with a changed input, or git could not be asked. A dash is a fact here.
- */
-export const TAG_UNKNOWN = '—'
 
 /** Deployed, Environment, Build, Tag, Node, Smoke: the shape written now. */
 const COLUMNS = 6
@@ -84,44 +83,6 @@ export function shortHash(stamp: Stamp): string {
   return stamp.hash.replace(/^sha256:/, '').slice(0, 12)
 }
 
-/**
- * One git call, with every way it can fail folded into `ok: false`: git absent,
- * killed for hanging past the timeout, or exiting non-zero. A log row is not
- * worth crashing a release over.
- */
-function git(root: string, args: string[]): { ok: boolean; out: string } {
-  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', timeout: 15_000 })
-  if (result.error) return { ok: false, out: '' }
-  return { ok: result.status === 0, out: (result.stdout ?? '').trim() }
-}
-
-/**
- * Which release this build ships as. The tag, not the commit: a deployment
- * logged two commits after the tag — documentation, tests, the installer — is
- * still the tagged bytes, so the bare tag is the honest answer rather than
- * `v1.0.0-2-gabc1234`. Anything else (no tag, a tree past its tag with a changed
- * build input, an uncommitted edit, no git) is a dash instead of a guess.
- */
-export function resolveTag(root: string = ROOT): string {
-  if (!git(root, ['rev-parse', '--git-dir']).ok) return TAG_UNKNOWN
-  const described = git(root, ['describe', '--tags'])
-  if (!described.ok) return TAG_UNKNOWN
-
-  // Uncommitted changes to an input mean these are not the tagged bytes, even
-  // when HEAD is the tagged commit.
-  const dirty = git(root, ['status', '--porcelain', '--', ...INPUTS])
-  if (!dirty.ok || dirty.out !== '') return TAG_UNKNOWN
-
-  const distance = described.out.match(/^(.*)-(\d+)-g([0-9a-f]+)$/)
-  if (!distance) return described.out
-
-  // Past the tag: only a tag whose inputs are untouched produced this build, and
-  // the stamp hashes exactly those inputs. One diff answers it, without copying
-  // the tree or rebuilding it.
-  const unchanged = git(root, ['diff', '--quiet', `refs/tags/${distance[1]}`, 'HEAD', '--', ...INPUTS])
-  return unchanged.ok ? distance[1] : described.out
-}
-
 function cells(line: string): string[] {
   return line
     .split('|')
@@ -139,7 +100,7 @@ export function rowFor(input: { environment: Environment; stamp: Stamp; checks: 
   // these bytes — not whichever Node happens to run this script.
   const node = input.stamp.node || RUNTIME_UNKNOWN
   // The tag describes the build, so a caller that knows it may pass it in; the
-  // log command resolves it from git instead of trusting the operator's memory.
+  // log command reads it from the stamp instead of trusting the operator's memory.
   const tag = input.tag ?? TAG_UNKNOWN
   return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${tag} | ${node} | ${result} |`
 }
@@ -343,7 +304,11 @@ export async function record(input: RecordInput): Promise<RecordResult> {
   const url = input.url ?? URLS[input.environment]
   const logPath = resolve(input.file ?? LOG_PATH)
   const checks = await smoke(url)
-  const row = rowFor({ environment: input.environment, stamp, checks, at: input.at, tag: input.tag ?? resolveTag(ROOT) })
+  // What the deployment says about itself is the truth to log: the stamp holds
+  // the tag the build baked in. Only a stamp written before that was recorded
+  // (empty tag) falls back to asking git at log time.
+  const baked = stamp.tag || resolveTag(ROOT)
+  const row = rowFor({ environment: input.environment, stamp, checks, at: input.at, tag: input.tag ?? baked })
   const placed = place(readFileSync(logPath, 'utf8'), row, input.environment, shortHash(stamp))
   writeFileSync(logPath, withStatus(placed.markdown, stamp))
 

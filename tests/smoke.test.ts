@@ -21,10 +21,15 @@ interface Faults {
   page?: number
   bundle?: number
   health?: number
+  /** A health body to serve instead of the healthy one, to break one field. */
+  healthBody?: Record<string, unknown>
   echoUnknown?: boolean
   emptyRack?: number
   noBundle?: boolean
 }
+
+/** What dist/build.json says a healthy build is, in these tests. */
+const RELEASE = { version: '1.0.0', tag: 'v1.0.0' }
 
 function shell(faults: Faults): string {
   const script = faults.noBundle ? '' : '<script type="module" src="/assets/index-test.js"></script>'
@@ -61,7 +66,8 @@ function handler(faults: Faults) {
 
     if (path === '/api/health') {
       if (faults.health) return send(faults.health, 'site temporarily unavailable', 'text/plain')
-      return send(200, JSON.stringify({ ok: true, service: 'red-queen' }), 'application/json')
+      const body = faults.healthBody ?? { ok: true, service: 'red-queen', ...RELEASE }
+      return send(200, JSON.stringify(body), 'application/json')
     }
 
     if (path === '/api/export' && request.method === 'POST') {
@@ -152,14 +158,14 @@ function failures(checks: Check[]): string[] {
 
 test('a healthy site passes every check', async () => {
   await withFixture({}, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath })
+    const checks = await smoke(base, { shellPath, release: RELEASE })
     assert.deepEqual(failures(checks), [])
     assert.equal(checks.length, 14)
     assert.match(find(checks, 'shell').detail, /200 · html/)
     assert.match(find(checks, 'deployment').detail, /identical to .*index\.html · sha256 [0-9a-f]{12}/)
     assert.match(find(checks, 'bundle').detail, /index-test\.js 200/)
     assert.match(find(checks, 'styles').detail, /index-test\.css 200/)
-    assert.match(find(checks, 'health').detail, /red-queen/)
+    assert.match(find(checks, 'health').detail, /red-queen 1\.0\.0 · v1\.0\.0 — the release this build ships as/)
     assert.match(find(checks, 'export').detail, /3 tools · refinement kept/)
     assert.match(find(checks, 'export empty').detail, /Your rack is empty/)
   })
@@ -170,7 +176,7 @@ test('a deployment serving an older shell fails even though every page answers',
   await withFixture(
     {},
     async (base, shellPath) => {
-      const checks = await smoke(base, { shellPath })
+      const checks = await smoke(base, { shellPath, release: RELEASE })
       assert.equal(find(checks, 'shell').ok, true)
       assert.equal(find(checks, 'route /rack').ok, true)
       const deployment = find(checks, 'deployment')
@@ -186,7 +192,7 @@ test('a deployment serving an older shell fails even though every page answers',
 
 test('a missing local build fails the comparison and names the remedy', async () => {
   await withFixture({}, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath: `${shellPath}.missing` })
+    const checks = await smoke(base, { shellPath: `${shellPath}.missing`, release: RELEASE })
     const deployment = find(checks, 'deployment')
     assert.equal(deployment.ok, false)
     assert.match(deployment.detail, /no local build at .*index\.html\.missing — run npm run release first/)
@@ -195,7 +201,7 @@ test('a missing local build fails the comparison and names the remedy', async ()
 
 test('a page that stops serving is caught while the rest still pass', async () => {
   await withFixture({ page: 500 }, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath })
+    const checks = await smoke(base, { shellPath, release: RELEASE })
     assert.equal(find(checks, 'shell').ok, true)
     assert.equal(find(checks, 'deployment').ok, true)
     assert.equal(find(checks, 'health').ok, true)
@@ -208,7 +214,7 @@ test('a page that stops serving is caught while the rest still pass', async () =
 
 test('a failed health endpoint fails the run', async () => {
   await withFixture({ health: 503 }, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath })
+    const checks = await smoke(base, { shellPath, release: RELEASE })
     const health = find(checks, 'health')
     assert.equal(health.ok, false)
     assert.match(health.detail, /got 503/)
@@ -216,9 +222,50 @@ test('a failed health endpoint fails the run', async () => {
   })
 })
 
+test('a deployment serving an earlier release is caught by its nameplate', async () => {
+  await withFixture({ healthBody: { ok: true, service: 'red-queen', version: '1.0.0', tag: 'v0.9.0' } }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    const health = find(checks, 'health')
+    assert.equal(health.ok, false)
+    assert.match(health.detail, /reports v0\.9\.0, but this build ships as v1\.0\.0 — it is serving a different release/)
+    assert.deepEqual(failures(checks), [`health: ${health.detail}`])
+  })
+})
+
+test('a site that cannot name its release fails instead of passing quietly', async () => {
+  await withFixture({ healthBody: { ok: true, service: 'red-queen' } }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    const health = find(checks, 'health')
+    assert.equal(health.ok, false)
+    assert.match(health.detail, /reports no version — it is serving a Worker built before the release nameplate/)
+  })
+})
+
+test('a version that drifts while the tag matches is still caught', async () => {
+  await withFixture({ healthBody: { ok: true, service: 'red-queen', version: '1.1.0', tag: 'v1.0.0' } }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    assert.match(find(checks, 'health').detail, /reports 1\.1\.0, but this build is 1\.0\.0/)
+  })
+})
+
+test('an untagged build passes when the site agrees there is no tag', async () => {
+  await withFixture({ healthBody: { ok: true, service: 'red-queen', version: '1.0.0', tag: null } }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: { version: '1.0.0', tag: null } })
+    assert.deepEqual(failures(checks), [])
+    assert.match(find(checks, 'health').detail, /red-queen 1\.0\.0 · no tag/)
+  })
+})
+
+test('a site that drops the tag its build carries is caught', async () => {
+  await withFixture({ healthBody: { ok: true, service: 'red-queen', version: '1.0.0', tag: null } }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    assert.match(find(checks, 'health').detail, /reports no tag, but this build ships as v1\.0\.0/)
+  })
+})
+
 test('an export that echoes an unknown slug is caught', async () => {
   await withFixture({ echoUnknown: true }, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath })
+    const checks = await smoke(base, { shellPath, release: RELEASE })
     const exported = find(checks, 'export')
     assert.equal(exported.ok, false)
     assert.match(exported.detail, /unknown slug/)
@@ -227,7 +274,7 @@ test('an export that echoes an unknown slug is caught', async () => {
 
 test('an empty rack answered with a document is caught', async () => {
   await withFixture({ emptyRack: 200 }, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath })
+    const checks = await smoke(base, { shellPath, release: RELEASE })
     const empty = find(checks, 'export empty')
     assert.equal(empty.ok, false)
     assert.match(empty.detail, /expected 400, got 200/)
@@ -236,7 +283,7 @@ test('an empty rack answered with a document is caught', async () => {
 
 test('a shell with no bundle is caught', async () => {
   await withFixture({ noBundle: true }, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath })
+    const checks = await smoke(base, { shellPath, release: RELEASE })
     assert.equal(find(checks, 'shell').ok, true)
     assert.match(find(checks, 'bundle').detail, /loads no JavaScript bundle/)
     assert.equal(find(checks, 'styles').ok, true)

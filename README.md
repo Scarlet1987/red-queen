@@ -171,8 +171,9 @@ Queen (directory, rack, safety, COS-G) is untouched.
 smoke`: seven checks that this copy works where it is running — local storage,
 the saved rack and refinements through their validators, the catalogue (38 tools,
 unique slugs, known categories and levels), covers loading as SVG, `POST
-/api/export` returning Markdown with a refinement note kept, `/api/health`, and
-your model endpoint when one is configured. It reads only: the single write is a
+/api/export` returning Markdown with a refinement note kept, `/api/health` — whose
+answer names the release (`red-queen · hosted · 1.0.0 · v1.0.0`) — and your model
+endpoint when one is configured. It reads only: the single write is a
 probe key it removes again, and no project folder is touched. Results stay on
 screen with timings, so a test launch can be reported by reading them out — 6 of
 7 passed and 1 skipped is the normal result with no model configured.
@@ -327,7 +328,9 @@ writes the unit, and prints the two `systemctl` commands that finish the job.
 The install needs Node and npm to build once; the installed copy needs only
 Node, with no dependencies to install. Its server is `node:http` and the static
 build, and it serves `/api/health` and `/api/export` from the same shared
-Markdown builder as the Worker.
+Markdown builder as the Worker. Its health answer reports the mode it runs in
+(`metal`, `sandbox`, `vm`) and that it is offline; the hosted Worker's answer
+also names the release, because there is no `install.json` to ask there.
 
 ## Run it
 
@@ -380,6 +383,12 @@ exits non-zero;
   some other machine's Node 22 is refused even though its inputs match. A stamp
   too old to name its runtime is refused too, rather than trusted;
 - **typecheck, tests or COS-G fail** → the gate exits non-zero.
+
+The build also refuses to finish when it cannot bake its own nameplate: if the
+substitution that puts the version and release tag into the Worker stops
+applying, `build-offline.ts` finds `__RED_QUEEN_VERSION__` still in the bundle
+and stops before stamping, rather than deploy a site whose `/api/health` would
+answer 500.
 
 Every refusal removes `dist/deploy.json` before it starts, so a failed gate
 leaves nothing to upload — and a plain `npm run build` deletes any manifest too,
@@ -461,11 +470,12 @@ release checks:
   the version and build time, the release tag those bytes ship as, the Node that
   produced the build (from the same stamp the gate checks, never the one running
   the log command), and either `14/14` or the names of the checks that failed; a
-  build whose stamp cannot name its runtime logs `—` instead. The tag comes from
-  git rather than from typing: the tag whose build inputs are this build's, so
-  logging a deploy two commits after the tag still writes `v1.0.0` instead of
-  `v1.0.0-2-gabc1234`, and a tree past its tag with a changed input keeps the
-  described form. A test walks a throwaway repository through all of it —
+  build whose stamp cannot name its runtime logs `—` instead. The tag is the
+  one the build baked into `/api/health`, read from the stamp rather than typed:
+  the row and the live site then agree by construction, both saying `v1.0.0`
+  for bytes cut at the tag, or the described form when the tree has moved past
+  it with a changed input. A stamp written before the tag was recorded falls
+  back to asking git the same question. A test walks a throwaway repository through all of it —
   tagged, docs-only commit, code commit, uncommitted edit, no tags, no
   repository — because that answer depends on git, not on the checkout. A new build is inserted directly under the
   header, a different build for the same environment becomes a second row, a
@@ -521,7 +531,8 @@ src/app/lib/               harness state, rack, refinements, worksheets, jump st
 src/app/lib/validate.ts    storage validators (pure, covered by tests)
 tests/                      storage, doctrine, export, detector and release tests
 tests/slow/                 the install cycle: packs, serves and uninstalls each mode
-src/worker/index.ts        /api/health, /api/export (Markdown)
+src/worker/index.ts        /api/health (version + release tag), /api/export (Markdown)
+scripts/release-tag.ts     which tag a build ships as: log, stamp and health agree
 scripts/make-covers.ts     SVG cover generator
 scripts/build-directory.ts DIRECTORY.md generator
 scripts/check-size.ts      100 MB base-program budget
@@ -570,7 +581,12 @@ refinement and an unknown slug, and the empty-rack refusal — then exits
 non-zero naming whichever check failed. The shell it receives is compared
 byte-for-byte (SHA-256) with `dist/client/index.html`, so a deployment that
 silently skipped the latest build fails even though every page answers; the
-failure names both asset bundles. `npm run smoke -- https://…` checks another
+failure names both asset bundles. The site also has to name its own release:
+`/api/health` answers with the version and tag the build baked in (see
+`define` in [vite.config.ts](vite.config.ts)), and those must match
+`dist/build.json`, so a Worker from an older build is caught by its own
+nameplate — a site that reports no version at all is one built before the
+endpoint said anything but `{ ok, service }`. `npm run smoke -- https://…` checks another
 deployment; a 503 is reported as a hosting pause, not an app failure. What was
 deployed and how it answered is logged in [RELEASES.md](RELEASES.md) — build
 hash, release tag, environment and smoke result, one row per deployment, written by

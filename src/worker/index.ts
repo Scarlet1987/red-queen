@@ -10,7 +10,12 @@ type Env = { ASSETS: Fetcher }
 
 const app = new Hono<{ Bindings: Env }>()
 
-app.get('/api/health', (c) => c.json({ ok: true, service: 'red-queen' }))
+// Health doubles as the deployment's nameplate: version and tag are baked in by
+// the build (see vite.config.ts), so asking a deployment which release it is
+// answers from the bytes themselves rather than from a file it might not have.
+app.get('/api/health', (c) =>
+  c.json({ ok: true, service: 'red-queen', version: __RED_QUEEN_VERSION__, tag: __RED_QUEEN_TAG__ }),
+)
 
 // Build a Markdown shortlist from the slugs the browser sends. The catalogue is
 // the only source of truth: unknown slugs are dropped rather than echoed back,

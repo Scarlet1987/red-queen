@@ -34,6 +34,7 @@ const stamp = (overrides: Partial<Stamp> = {}): Stamp => ({
   worker: 'red_queen/index.js',
   assets: 'client',
   node: process.version,
+  tag: 'v1.0.0',
   files: {},
   hash: 'sha256:429051402764d5408e23fa3182a186ddee821a1ae18ccbe578f60af65066d8bd',
   ...overrides,
@@ -208,7 +209,7 @@ test('refreshing a log on disk writes the mismatch between build and record', ()
   try {
     writeFileSync(logPath, LOGGED)
     mkdirSync(join(root, 'dist'), { recursive: true })
-    writeBuildStamp(root, { version: '1.0.0', compatibilityDate: '2026-09-29', worker: 'red_queen/index.js', assets: 'client' })
+    writeBuildStamp(root, { version: '1.0.0', compatibilityDate: '2026-09-29', worker: 'red_queen/index.js', assets: 'client', tag: 'v1.0.0' })
 
     const refreshed = refreshStatusFile(root)
     assert.ok(refreshed)

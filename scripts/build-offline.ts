@@ -11,6 +11,7 @@ import ts from 'typescript'
 import { safetyMeta, tools } from '../src/data/tools.ts'
 import { writeBuildStamp } from './build-stamp.ts'
 import { verdictFor } from './check-runtime.ts'
+import { resolveTag, tagOrNull } from './release-tag.ts'
 
 const root = process.cwd()
 const client = join(root, 'dist', 'client')
@@ -83,11 +84,35 @@ if (!existsSync(join(root, 'dist', worker))) {
   console.error(`build-offline: expected the Worker at dist/${worker}; check the worker name in wrangler.jsonc.`)
   process.exit(2)
 }
+
+// /api/health names the release from constants baked in by vite.config.ts, since
+// a Worker has no git and no dist/build.json to consult. If a define stops being
+// substituted — a moved config, a plugin that replaces it — the identifier would
+// survive into the bundle and the endpoint would answer 500, so the build refuses
+// here rather than ship a site that cannot say which release it is.
+const tag = resolveTag(root)
+const bundle = readFileSync(join(root, 'dist', worker), 'utf8')
+const unsubstituted = bundle.match(/__RED_QUEEN_(VERSION|TAG)__/)
+if (unsubstituted) {
+  console.error(`build-offline: the Worker still contains ${unsubstituted[0]}; the release defines in vite.config.ts were not applied.`)
+  process.exit(2)
+}
+if (!bundle.includes(version)) {
+  console.error(`build-offline: the Worker does not carry version ${version}; /api/health would not name this build.`)
+  process.exit(2)
+}
+const bakedTag = tagOrNull(tag)
+if (bakedTag !== null && !bundle.includes(bakedTag)) {
+  console.error(`build-offline: the Worker does not carry the release tag ${bakedTag}; /api/health would not name this build.`)
+  process.exit(2)
+}
+
 // writeBuildStamp also drops any manifest from an earlier gate, because these
 // bytes are not the ones those checks ran against.
-const stamp = writeBuildStamp(root, { version, compatibilityDate, worker, assets: 'client' })
+const stamp = writeBuildStamp(root, { version, compatibilityDate, worker, assets: 'client', tag })
 
 console.log(`Offline bundle ready: ${catalogue.tools.length} tools in dist/server.`)
 console.log(`Worker for deploy: dist/${worker}`)
 console.log(`Build stamped: ${stamp.hash.slice(0, 19)}… over ${Object.keys(stamp.files).length} inputs.`)
+console.log(`Release baked in: ${version} · ${bakedTag ?? 'no tag'} — /api/health reports it.`)
 console.log('Publish with: npm run gate, then sites_deploy with dist/deploy.json.')

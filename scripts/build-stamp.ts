@@ -41,6 +41,12 @@ export interface Stamp {
    * before this was recorded, which the gate refuses rather than assumes.
    */
   node: string
+  /**
+   * The release the bytes were baked with, e.g. v1.0.0, or empty when no tag
+   * described them at build time. This is the value /api/health reports, so the
+   * smoke test can compare what the site says against what was built.
+   */
+  tag: string
   /** Hash per input file, keyed by path relative to the repository root. */
   files: Record<string, string>
   hash: string
@@ -51,6 +57,8 @@ export interface StampMeta {
   compatibilityDate: string
   worker: string
   assets: string
+  /** The tag the build baked into /api/health; a dash when none describes it. */
+  tag: string
 }
 
 function collect(root: string, target: string, into: Record<string, string>): void {
@@ -103,6 +111,7 @@ export function readStamp(root: string): Stamp | null {
       worker: parsed.worker,
       assets: parsed.assets,
       node: typeof parsed.node === 'string' ? parsed.node : '',
+      tag: typeof parsed.tag === 'string' ? parsed.tag : '',
       files: parsed.files,
       hash: parsed.hash,
     }
@@ -124,6 +133,9 @@ export function writeBuildStamp(root: string, meta: StampMeta): Stamp {
     // The runtime is not part of the hash — the inputs are — but recording it
     // lets the gate tell a build made on the pinned Node from one made elsewhere.
     node: process.version,
+    // Likewise the tag: the same inputs can be built before and after a tag is
+    // cut, and the deployed bytes carry whichever value they were baked with.
+    tag: meta.tag,
     files,
     hash,
   }

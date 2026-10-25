@@ -57,6 +57,21 @@ test('a clean project produces no findings', () => {
   assert.equal(status, 0)
 })
 
+test('a declaration file is scanned as types, not transpiled as JavaScript', () => {
+  // A .d.ts emits no JavaScript, so the transpiler behind the syntax rule throws
+  // on one instead of reporting a parse error. Ambient declarations have to be
+  // allowed in a project the checker can run over.
+  const root = fixture({
+    '.gitignore': gitignore,
+    'src/globals.d.ts': 'declare const __VERSION__: string\n',
+    'src/main.ts': 'export const answer = 42\n',
+  })
+  const { status, report } = scan(root)
+  assert.deepEqual(report.findings.S, [])
+  assert.equal(report.total, 0)
+  assert.equal(status, 0)
+})
+
 test('C catches an unguarded parse and an empty catch', () => {
   const root = fixture({
     '.gitignore': gitignore,
