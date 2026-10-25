@@ -6,12 +6,14 @@ a row is evidence the published site answered, not just that an upload
 finished.
 
 **Build** is the gate's content hash from `dist/build.json`, written by
-`npm run release`. **Tag** is the release those bytes ship as, resolved from git
-when the row is written: the tag whose build inputs are this build's, so a
-deploy logged a couple of commits after the tag still reads `v1.0.0` instead of
-`v1.0.0-2-gabc1234`. A build no tag describes — an untagged branch, an input
-changed since the tag, an uncommitted edit — logs `—`, which is a fact rather
-than a gap. **Node** is the runtime that produced that build, taken from
+`npm run release`. **Tag** is the release those bytes ship as, read from
+`dist/build.json`: the build bakes it into `/api/health`, so the row and the
+live site say the same thing. The build resolves it as the tag whose inputs are
+its own, so bytes cut at the tag read `v1.0.0` even when the deploy is logged a
+couple of commits later, and a tree past its tag with a changed input keeps the
+`v1.0.0-2-gabc1234` form. A build no tag describes — an untagged branch, an
+input changed since the tag, an uncommitted edit — logs `—`, which is a fact
+rather than a gap. **Node** is the runtime that produced that build, taken from
 the same stamp — so the gate refuses a build made off the pin and the row then
 names the version it was made on. Rows logged before a column existed show
 `—`: the runtime or the version of those builds was not recorded, and this log
@@ -35,10 +37,12 @@ deployment. The Node and tag rules bind only to the row for the current build,
 and a dashed tag on that row passes: a build can ship before any tag names it.
 The dashes on older rows are history, not drift.
 
-> **Build status:** `dist/build.json` is `267de9ddf693`, which matches the newest logged build.
+> **Build status:** `dist/build.json` is `5c17c5487276`, which matches the newest logged build.
 
 | Deployed (UTC) | Environment | Build | Tag | Node | Smoke |
 | --- | --- | --- | --- | --- | --- |
+| 2026-10-25 23:30 | preview | `5c17c5487276` — 1.0.0, built 23:27 | v1.0.0-4-g7bfd380 | v24.17.0 | 14/14 |
+| 2026-10-25 23:30 | production | `5c17c5487276` — 1.0.0, built 23:27 | v1.0.0-4-g7bfd380 | v24.17.0 | 14/14 |
 | 2026-10-25 22:09 | preview | `267de9ddf693` — 1.0.0, built 20:49 | v1.0.0 | v24.17.0 | 14/14 |
 | 2026-10-25 20:51 | production | `267de9ddf693` — 1.0.0, built 20:49 | v1.0.0 | v24.17.0 | 14/14 |
 | 2026-10-25 16:54 | production | `307b1cc03a98` — 1.0.0, built 16:54 | — | v24.17.0 | 14/14 |
