@@ -20,8 +20,9 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFile
 import { extname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
+import { blacklistSummary, type HostReport } from '../src/lib/host-view.ts'
 import { extended, labels, playbooks, type Category } from './doctrine.ts'
-import { blacklistSummary, scanHost, type HostReport } from './host-scan.ts'
+import { scanHost } from './host-scan.ts'
 
 type Severity = 'error' | 'warn' | 'info'
 

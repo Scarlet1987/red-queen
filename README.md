@@ -119,6 +119,16 @@ package rather than each version, since dkms keeps superseded versions around
 and an idle old one is harmless while the current one works; a package whose
 every record has lost its source is reported once, as that, and not again.
 
+Two things keep that warning honest. If the kernel's own package already carries
+a module the record builds — read from `modules.dep`, counting only paths outside
+`updates/` and `extra/`, where dkms writes what it installs — then nothing is
+missing and the rule says so by staying quiet: platform drivers move into the
+kernel, and the packages that predate the move sit deliberately unbuilt while the
+kernel loads its own copy. And if the record itself declares this kernel out of
+range with `BUILD_EXCLUSIVE_KERNEL_MIN` or `_MAX`, the build was never asked for,
+which is not a build that failed: that is printed as a note rather than a
+warning, so it never reaches the cell a release row carries.
+
 A block that is not doing its job is its own ghost. `/proc/modules` is read, so
 a module named in `/etc/modprobe.d` that is loaded right now is reported as
 `blacklist-ineffective`, with what is holding it: pulled in by a dependency
@@ -144,6 +154,15 @@ blocks a hundred of them and the list would bury the finding that matters;
 `--json` carries the full device, blacklist, loaded-module and DKMS detail. Host findings are
 warnings, so `--host` never fails a build — `--strict` is the exception. The
 sweep needs Linux sysfs and says so plainly, then reports nothing, elsewhere.
+
+The same sweep is what the COS-G page shows. A local install answers `/api/host`
+with a sweep of the machine it is running on, so the panel on that page reads the
+drivers, the blocks, the idle drivers and the DKMS records without opening a
+terminal first. The hosted copy answers the same route in the same shape, saying
+that a Worker has no filesystem and therefore no machine to read; a sandbox
+install says its confinement is why it cannot look, rather than reporting a host
+it never read. It is a section of the page it belongs to — one request, one
+button to read again — not another destination to navigate to.
 
 The same sweep runs as part of `npm run release:log`, so every release row
 records what the machine that made it reported: `clean — 23 devices on 7.2.6`,
@@ -380,8 +399,9 @@ writes the unit, and prints the two `systemctl` commands that finish the job.
 
 The install needs Node and npm to build once; the installed copy needs only
 Node, with no dependencies to install. Its server is `node:http` and the static
-build, and it serves `/api/health` and `/api/export` from the same shared
-Markdown builder as the Worker. Its health answer reports the mode it runs in
+build, and it serves `/api/health`, `/api/export` and `/api/host` from the same
+shared Markdown builder and host view as the Worker — the one difference being
+that it has a machine under it to sweep. Its health answer reports the mode it runs in
 (`metal`, `sandbox`, `vm`) and that it is offline; the hosted Worker's answer
 also names the release, because there is no `install.json` to ask there.
 
@@ -585,12 +605,15 @@ src/app/lib/               harness state, rack, refinements, worksheets, jump st
 src/app/lib/validate.ts    storage validators (pure, covered by tests)
 tests/                      storage, doctrine, export, detector and release tests
 tests/slow/                 the install cycle: packs, serves and uninstalls each mode
-src/worker/index.ts        /api/health (version + release tag), /api/export (Markdown)
+src/worker/index.ts        /api/health (version + release tag), /api/export (Markdown),
+                           /api/host (the hosted copy has no machine, and says so)
 scripts/release-tag.ts     which tag a build ships as: log, stamp and health agree
 scripts/make-covers.ts     SVG cover generator
 scripts/build-directory.ts DIRECTORY.md generator
 scripts/check-size.ts      100 MB base-program budget
 src/lib/rack-markdown.ts   shared rack export (Worker + offline server)
+src/lib/host-view.ts       the host sweep's shape and its reading, shared the same way
+src/app/components/HostPanel.tsx  the machine under this copy, on the COS-G page
 scripts/cosg.ts            read-only C / O / S / G checker
 scripts/doctrine.ts        the COS-G playbooks and extended framework index
 scripts/host-scan.ts       the machine behind the project: drivers, blacklists, DKMS

@@ -1,10 +1,14 @@
-// The offline server: static app, health check and the rack export, using only
-// Node's standard library. Copied into every install directory by build-offline.
+// The offline server: static app, health check, the rack export and the host
+// sweep, using only Node's standard library. Copied into every install directory
+// by build-offline, along with the catalogue, the Markdown builder, the sweep and
+// its shared reading.
 import { createReadStream, readFileSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { scanHost } from './host-scan.mjs'
+import { hostUnavailable, hostView, unavailableReason } from './host-view.mjs'
 import { rackMarkdown } from './rack-markdown.mjs'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
@@ -83,6 +87,23 @@ function main() {
 
       if (path === '/api/health') {
         send(res, 200, JSON.stringify({ ok: true, service: 'red-queen', mode, offline: true }), { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        return
+      }
+
+      // The machine this copy is installed on, swept on request. This is the
+      // only copy of Red Queen that has a machine to read: the hosted Worker has
+      // no filesystem, so it answers the same route saying so. Read-only, and a
+      // sweep that cannot look is a 200 with the reason rather than an error —
+      // a sandbox install is confined to its own directory by design.
+      if (path === '/api/host') {
+        let view
+        try {
+          view = hostView(scanHost(), mode)
+        } catch (error) {
+          const why = `The sweep could not run: ${error instanceof Error ? error.message : String(error)}`
+          view = hostUnavailable(mode, unavailableReason(why, mode))
+        }
+        send(res, 200, JSON.stringify(view), { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         return
       }
 

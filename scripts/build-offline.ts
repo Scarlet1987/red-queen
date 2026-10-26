@@ -1,5 +1,6 @@
 // Assembles dist/server for the offline install: the catalogue as JSON, the
-// shared Markdown builder transpiled to plain ESM, and the Node server.
+// Markdown builder, the host sweep and its shared view transpiled to plain ESM,
+// and the Node server that serves them.
 //
 //   npm run build        (vite build → postbuild → this)
 //   node scripts/build-offline.ts
@@ -32,12 +33,22 @@ if (!existsSync(join(client, 'index.html'))) {
 
 mkdirSync(outDir, { recursive: true })
 
-const builder = readFileSync(join(root, 'src', 'lib', 'rack-markdown.ts'), 'utf8')
-const { outputText } = ts.transpileModule(builder, {
-  fileName: 'rack-markdown.ts',
-  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-})
-writeFileSync(join(outDir, 'rack-markdown.mjs'), outputText)
+// The modules the offline server imports from our own sources, transpiled
+// beside it as plain ESM. Each is transpiled on its own, so none of them may
+// import a value from src/ — the sweep imports only types from the shared view,
+// which is what lets it be shipped this way.
+const shared: [source: string, out: string][] = [
+  ['src/lib/rack-markdown.ts', 'rack-markdown.mjs'],
+  ['src/lib/host-view.ts', 'host-view.mjs'],
+  ['scripts/host-scan.ts', 'host-scan.mjs'],
+]
+for (const [source, out] of shared) {
+  const { outputText } = ts.transpileModule(readFileSync(join(root, source), 'utf8'), {
+    fileName: source,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+  })
+  writeFileSync(join(outDir, out), outputText)
+}
 
 const catalogue = {
   labels: {

@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path'
 import { after, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { blacklistSummary, scanHost, summarizeHost, type HostFinding, type HostReport } from '../scripts/host-scan.ts'
+import { scanHost } from '../scripts/host-scan.ts'
+import { blacklistSummary, summarizeHost, type HostFinding, type HostReport } from '../src/lib/host-view.ts'
 
 // The host sweep reads real sysfs, /etc/modprobe.d and /var/lib/dkms by default.
 // Every test here points it at a throwaway tree shaped the way Linux shapes the
@@ -332,6 +333,79 @@ test('a DKMS package with no build for the running kernel is reported as gone at
     report.findings.filter((finding) => finding.rule === 'stale-dkms').map((finding) => finding.file?.split('/').slice(-2).join('/')),
     ['legacy/1.0'],
   )
+})
+
+test('a package whose module the kernel itself carries is redundant, not missing', () => {
+  const root = fixture(
+    {
+      // The platform driver moved into the kernel: the package excludes 7.2 by
+      // its own rule, and the kernel tree ships system76_acpi.ko, so warning
+      // that it will not survive the next boot would simply be untrue.
+      'var/lib/dkms/system76_acpi/1.0.2/source/dkms.conf':
+        'PACKAGE_NAME="system76_acpi"\nBUILT_MODULE_NAME[0]="system76_acpi"\nBUILD_EXCLUSIVE_KERNEL_MAX=7.1\n',
+      // A copy under updates/ is something DKMS installed, not the kernel
+      // carrying it, so this package is still reported.
+      'var/lib/dkms/foo/1.0/source/dkms.conf': 'PACKAGE_NAME="foo"\nBUILT_MODULE_NAME[0]="foo"\n',
+      // Real modules.dep lines are absolute; the DKMS-installed copy of foo sits
+      // under updates/, which is what makes it not the kernel carrying it.
+      'lib/modules/7.2.6/modules.dep':
+        '/lib/modules/7.2.6/kernel/drivers/platform/x86/system76_acpi.ko.zst:\n/lib/modules/7.2.6/updates/dkms/foo.ko.zst:\n',
+      ...device('0000:01:00.0', '030000', '1002', '67df', GPU_MODALIAS),
+    },
+    { 'sys/0000:01:00.0/driver': '../drivers/amdgpu' },
+  )
+
+  const report = scan(root)
+  assert.deepEqual(
+    report.findings.map((finding) => finding.rule),
+    ['dkms-not-built'],
+    'only the package the kernel does not carry is reported',
+  )
+  assert.equal(report.findings[0].severity, 'warn')
+  assert.match(report.findings[0].message, /^DKMS module foo /)
+
+  // The record's own claim about itself is carried into the report, which is
+  // what the rule reads to tell a missing build from one nobody asked for.
+  const record = report.dkms.find((entry) => entry.name === 'system76_acpi')
+  assert.deepEqual(record?.modules, ['system76_acpi'])
+  assert.deepEqual(record?.exclusive, { min: '', max: '7.1' })
+})
+
+test('a package that excludes this kernel by its own rule is a note, not a warning', () => {
+  const root = fixture(
+    {
+      'var/lib/dkms/system76/1.0.22/source/dkms.conf':
+        'PACKAGE_NAME="system76"\nBUILT_MODULE_NAME[0]="system76"\nBUILD_EXCLUSIVE_KERNEL_MIN=6.0\nBUILD_EXCLUSIVE_KERNEL_MAX=7.1\n',
+      ...device('0000:01:00.0', '030000', '1002', '67df', GPU_MODALIAS),
+    },
+    { 'sys/0000:01:00.0/driver': '../drivers/amdgpu' },
+  )
+
+  const report = scan(root)
+  const [finding] = report.findings
+  assert.equal(finding.rule, 'dkms-not-built')
+  assert.equal(finding.severity, 'info', 'a build that was never asked for is not a failure')
+  assert.match(finding.message, /BUILD_EXCLUSIVE_KERNEL_MIN=6\.0 and MAX=7\.1/)
+  assert.match(finding.message, /nothing to rebuild/)
+  // A note is not a warning: the cell a release row carries counts warnings.
+  assert.equal(summarizeHost(report).cell, 'clean — 1 device on 7.2.6')
+})
+
+test('a kernel inside the declared range keeps the warning, because dkms owed a build', () => {
+  // MIN=7.2 with 7.2.6 running: inside the range, so nothing excused the absent
+  // build and the warning stands.
+  const root = fixture(
+    {
+      'var/lib/dkms/foo/1.0/source/dkms.conf': 'PACKAGE_NAME="foo"\nBUILT_MODULE_NAME[0]="foo"\nBUILD_EXCLUSIVE_KERNEL_MIN=7.2\n',
+      ...device('0000:01:00.0', '030000', '1002', '67df', GPU_MODALIAS),
+    },
+    { 'sys/0000:01:00.0/driver': '../drivers/amdgpu' },
+  )
+
+  const report = scan(root)
+  assert.equal(report.findings.length, 1)
+  assert.equal(report.findings[0].severity, 'warn')
+  assert.match(report.findings[0].message, /never been built for any kernel/)
 })
 
 test('the blacklist summary counts files instead of listing a distro s worth of modules', () => {

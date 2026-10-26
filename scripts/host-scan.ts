@@ -1,5 +1,6 @@
 // The host half of COS-G's ghost pass: `npm run cosg -- . --host` adds this to
-// the report. It answers three questions about the machine the project sits on.
+// the report, and a local install serves it to the app at /api/host. It answers
+// four questions about the machine the project sits on.
 //
 //   Which PCI hardware has a driver, and which is present but dark?
 //   Which driver modules are blocked from loading, and is that blocking
@@ -17,77 +18,16 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from 'n
 import { release } from 'node:os'
 import { basename, join } from 'node:path'
 
-export type HostRule =
-  | 'unbound-hardware'
-  | 'blacklisted-driver'
-  | 'blacklist-ineffective'
-  | 'idle-driver'
-  | 'stale-dkms'
-  | 'dkms-not-built'
+// The report's shape, and the one-line readings of it, live in
+// src/lib/host-view.ts: that module has no node imports, so the app and the
+// hosted Worker can load it as well as this sweep. Type-only, deliberately —
+// this file is transpiled on its own into the offline bundle, where an import of
+// a value from src/lib could not be resolved.
+import type { HostBlacklist, HostDevice, HostDkms, HostFinding, HostModule, HostReport } from '../src/lib/host-view.ts'
 
-export interface HostFinding {
-  rule: HostRule
-  /** Warn for hardware that is dark or a record that breaks a tool; info otherwise. */
-  severity: 'warn' | 'info'
-  message: string
-  /** The file the finding is about, when it is about a file rather than a device. */
-  file?: string
-}
-
-export interface HostDevice {
-  /** PCI slot, e.g. 0000:0b:00.0. */
-  slot: string
-  /** Readable class name, e.g. display, or the raw class when it is unknown. */
-  kind: string
-  /** Device name from pci.ids, or the vendor and ids when that file is absent. */
-  name: string
-  /** The module bound to the device, or null when nothing is bound. */
-  driver: string | null
-  /**
-   * The module behind that driver. A driver's name is often not its module's —
-   * i2c_i801 provides i801_smbus — and only sysfs knows which module it is.
-   */
-  module: string | null
-  modalias: string
-}
-
-export interface HostBlacklist {
-  module: string
-  /** The .conf that blocks it — modprobe ignores files without that suffix. */
-  file: string
-  line: number
-}
-
-export interface HostModule {
-  name: string
-  /** How many things hold a reference to it, from /proc/modules. */
-  used: number
-  /** Loaded modules that list it as a dependency. */
-  dependents: string[]
-}
-
-export interface HostDkms {
-  name: string
-  version: string
-  path: string
-  /** Whether source/dkms.conf is still there; without it the record is broken. */
-  conf: boolean
-  /** Kernels the module is built for, newest name last. */
-  built: string[]
-}
-
-export interface HostReport {
-  available: boolean
-  /** Why the sweep did not run, when it did not. */
-  reason: string
-  kernel: string
-  devices: HostDevice[]
-  blacklists: HostBlacklist[]
-  /** What is loaded right now, from /proc/modules. */
-  loaded: HostModule[]
-  dkms: HostDkms[]
-  findings: HostFinding[]
-}
+// Re-exported so the CLI, the release log and the tests keep reading the sweep's
+// own types from the sweep.
+export type { HostBlacklist, HostDevice, HostDkms, HostFinding, HostModule, HostReport, HostRule } from '../src/lib/host-view.ts'
 
 export interface HostOptions {
   /** Defaults to /sys/bus/pci/devices. */
@@ -264,6 +204,28 @@ function readBlacklists(dir: string): HostBlacklist[] {
 }
 
 /**
+ * The few keys of a dkms.conf this sweep has an opinion about. The file is a
+ * shell script, and these are assignments: which modules the package builds, and
+ * whether the package itself declares this kernel out of range.
+ */
+function readDkmsConf(path: string): { present: boolean; modules: string[]; exclusive: { min: string; max: string } } {
+  const modules: string[] = []
+  const exclusive = { min: '', max: '' }
+  const text = read(path)
+  if (text === null) return { present: false, modules, exclusive }
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\s*([A-Z_]+)(?:\[\d+\])?\s*=\s*"?([^"#]*)"?\s*$/)
+    if (!match) continue
+    const value = match[2].trim()
+    if (!value) continue
+    if (match[1] === 'BUILT_MODULE_NAME') modules.push(value)
+    else if (match[1] === 'BUILD_EXCLUSIVE_KERNEL_MIN') exclusive.min = value
+    else if (match[1] === 'BUILD_EXCLUSIVE_KERNEL_MAX') exclusive.max = value
+  }
+  return { present: true, modules, exclusive }
+}
+
+/**
  * DKMS keeps every record under /var/lib/dkms/<name>/<version>, with a
  * `<kernel>/<arch>/module/*.ko` tree per built kernel. A record whose source is
  * gone makes `dkms status` exit with an error, which is what breaks the kernel
@@ -291,7 +253,10 @@ function readDkms(root: string): HostDkms[] {
         )
         if (hasModule) built.push(kernel)
       }
-      records.push({ name, version, path: dir, conf: existsSync(join(dir, 'source', 'dkms.conf')), built })
+      // What the record says about itself decides whether an absent build is a
+      // problem: see the dkms-not-built rule below.
+      const dkmsConf = readDkmsConf(join(dir, 'source', 'dkms.conf'))
+      records.push({ name, version, path: dir, conf: dkmsConf.present, built, modules: dkmsConf.modules, exclusive: dkmsConf.exclusive })
     }
   }
   return records
@@ -321,6 +286,48 @@ function readModules(path: string): HostModule[] {
   return modules.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/**
+ * The modules the running kernel's own package carries, read from modules.dep.
+ * A path under updates/ or extra/ is something a DKMS package installed; a path
+ * under kernel/ is the kernel tree itself. The distinction is the whole point:
+ * a driver the kernel ships is present whether or not a DKMS package builds a
+ * copy of it, so an unbuilt DKMS record for it is redundant rather than missing.
+ */
+function kernelProvides(modulesRoot: string): Set<string> {
+  const provided = new Set<string>()
+  const text = read(join(modulesRoot, 'modules.dep'))
+  if (!text) return provided
+  for (const line of text.split('\n')) {
+    const path = line.split(':')[0]?.trim()
+    if (!path || !MODULE_FILE.test(path)) continue
+    // Judged by path segment rather than by substring, so a relative path from a
+    // hand-written modules.dep is classified the same way an absolute one is.
+    const segments = path.split('/')
+    if (segments.includes('updates') || segments.includes('extra')) continue
+    provided.add(path.slice(path.lastIndexOf('/') + 1).replace(MODULE_FILE, '').replace(/-/g, '_'))
+  }
+  return provided
+}
+
+/** The numeric parts of a kernel name, for comparing one against a DKMS bound. */
+function kernelParts(name: string): number[] {
+  return (name.split('-')[0] ?? '')
+    .split('.')
+    .map((part) => Number.parseInt(part, 10))
+    .filter((value) => !Number.isNaN(value))
+}
+
+/** Positive when a is newer than b, negative when older; missing parts are zero. */
+function compareKernels(a: string, b: string): number {
+  const left = kernelParts(a)
+  const right = kernelParts(b)
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const diff = (left[index] ?? 0) - (right[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
 /** The modules whose aliases claim a device, loaded or not. */
 function claimants(aliases: Alias[], modalias: string): string[] {
   if (!modalias) return []
@@ -329,49 +336,6 @@ function claimants(aliases: Alias[], modalias: string): string[] {
     if (alias.matcher.test(modalias)) modules.add(alias.module)
   }
   return [...modules].sort()
-}
-
-/**
- * One line for the report. A stock distro blacklists a hundred modules across a
- * dozen files, so the count and the files say what is there without burying the
- * findings that name the modules claiming real hardware.
- */
-export function blacklistSummary(entries: HostBlacklist[], shown = 6): string {
-  if (entries.length === 0) return 'no blacklisted modules'
-  const files = new Map<string, number>()
-  for (const entry of entries) files.set(entry.file, (files.get(entry.file) ?? 0) + 1)
-  const ranked = [...files.entries()].sort((a, b) => b[1] - a[1])
-  const head = ranked.slice(0, shown).map(([file, count]) => `${basename(file)} (${count})`)
-  const rest = ranked.length - head.length
-  const modules = `${entries.length} module${entries.length === 1 ? '' : 's'} in ${files.size} file${files.size === 1 ? '' : 's'}`
-  return `${modules} — ${head.join(', ')}${rest > 0 ? `, and ${rest} more file${rest === 1 ? '' : 's'}` : ''}`
-}
-
-/** What a row says when the sweep could not look: a fact, like a dash tag. */
-export const HOST_UNAVAILABLE = 'unavailable — no sysfs'
-
-export interface HostSummary {
-  /** The cell a release row carries: the sweep in one line. */
-  cell: string
-  /** The warnings behind that cell, for printing next to it. */
-  warnings: HostFinding[]
-}
-
-/**
- * The sweep distilled to what a release row can hold. The kernel belongs in the
- * cell: "not built for the running kernel" only means something against a named
- * kernel, and a row read months later should not have to guess which one.
- */
-export function summarizeHost(report: HostReport): HostSummary {
-  if (!report.available) return { cell: HOST_UNAVAILABLE, warnings: [] }
-  const warnings = report.findings.filter((finding) => finding.severity === 'warn')
-  if (warnings.length === 0) {
-    const devices = `${report.devices.length} device${report.devices.length === 1 ? '' : 's'}`
-    return { cell: `clean — ${devices} on ${report.kernel}`, warnings }
-  }
-  const rules = [...new Set(warnings.map((finding) => finding.rule))]
-  const count = `${warnings.length} warning${warnings.length === 1 ? '' : 's'}`
-  return { cell: `${count} — ${rules.join(', ')} on ${report.kernel}`, warnings }
 }
 
 /**
@@ -590,11 +554,39 @@ export function scanHost(options: HostOptions = {}): HostReport {
     versions.push(record)
     packages.set(record.name, versions)
   }
+  const carried = kernelProvides(modulesRoot)
   for (const [name, records] of packages) {
     if (records.some((record) => record.built.includes(kernel))) continue
     // Every record broken is already reported above; a rebuild could not help
     // until the source is back, so saying it twice would only add noise.
     if (!records.some((record) => record.conf)) continue
+
+    // A package whose module the kernel itself ships needs no build here. The
+    // platform drivers moved into the kernel, so packages that predate that are
+    // left deliberately unbuilt — system76_acpi declares as much — while the
+    // kernel loads its own copy. "It will not be there after a reboot" would be
+    // false: it is there now, and the reboot cannot take it away.
+    if (records.flatMap((record) => record.modules).some((module) => carried.has(module.replace(/-/g, '_')))) continue
+
+    // The package's own statement that this kernel is out of range: a build that
+    // was never asked for is not a build that failed, so this is a note about
+    // why the module is absent rather than a warning to act on.
+    const bound = records.find((record) => record.exclusive.max || record.exclusive.min)
+    const lowest = bound?.exclusive.min ?? ''
+    const highest = bound?.exclusive.max ?? ''
+    const tooNew = highest !== '' && compareKernels(kernel, highest) > 0
+    const tooOld = lowest !== '' && compareKernels(kernel, lowest) < 0
+    if (tooNew || tooOld) {
+      const clause = [lowest ? `MIN=${lowest}` : '', highest ? `MAX=${highest}` : ''].filter(Boolean).join(' and ')
+      findings.push({
+        rule: 'dkms-not-built',
+        severity: 'info',
+        message: `DKMS module ${name} is not built for ${kernel} because the package itself excludes it (BUILD_EXCLUSIVE_KERNEL_${clause}) — the build was never asked for, so there is nothing to rebuild.`,
+        file: records.find((record) => record.conf)?.path,
+      })
+      continue
+    }
+
     const built = [...new Set(records.flatMap((record) => record.built))].sort()
     const state =
       built.length === 0

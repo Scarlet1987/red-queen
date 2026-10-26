@@ -46,8 +46,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { summarizeHost, type HostFinding, type HostReport } from '../src/lib/host-view.ts'
 import { readStamp, type Stamp } from './build-stamp.ts'
-import { scanHost, summarizeHost, type HostFinding, type HostReport } from './host-scan.ts'
+import { scanHost } from './host-scan.ts'
 import { resolveTag, TAG_UNKNOWN } from './release-tag.ts'
 import { checkNames, DEFAULT_BASE, smoke, type Check } from './smoke.ts'
 

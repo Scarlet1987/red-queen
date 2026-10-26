@@ -186,6 +186,29 @@ async function startServing(installed: Installed, mode: Mode) {
   assert.equal(health.mode, mode)
   assert.equal(health.offline, true)
 
+  // The COS-G page reads the machine through the server that serves the page, so
+  // an install that cannot answer this leaves the panel guessing. A sandbox copy
+  // is confined to its own directory by its permission flags: it must say so
+  // rather than report a host it never looked at.
+  const host = (await (await fetch(`${base}/api/host`)).json()) as {
+    available: boolean
+    mode: string
+    reason: string
+    cell: string
+    findings: unknown[]
+    counts: { devices: number; loaded: number }
+  }
+  assert.equal(host.mode, mode)
+  assert.ok(Array.isArray(host.findings))
+  assert.ok(host.cell.length > 0, 'the panel would have no line to show')
+  if (mode === 'sandbox') {
+    assert.equal(host.available, false)
+    assert.match(host.reason, /sandbox install/, 'a confined copy says why it cannot see the machine')
+  } else if (process.platform === 'linux' && existsSync('/sys/bus/pci/devices')) {
+    assert.equal(host.available, true, 'the sweep reads the machine this install sits on')
+    assert.ok(host.counts.devices > 0, 'the sweep found no PCI devices at all')
+  }
+
   const exported = await fetch(`${base}/api/export`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

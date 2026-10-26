@@ -1,6 +1,7 @@
 import { ArrowRight, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router'
 
+import { HostPanel } from '../components/HostPanel'
 import { ButtonLink, Container, Reveal, SectionTitle } from '../components/ui'
 
 // Each pass runs the same loop: define, choose one course of action, test it,
@@ -123,6 +124,7 @@ export function Cosg() {
             {'\n'}npm run cosg -- ../my-project
             {'\n'}npm run cosg -- . --json
             {'\n'}npm run cosg -- . --report cosg-report.md
+            {'\n'}npm run cosg -- . --host{'        '}and the machine: drivers, blacklists, DKMS
             {'\n'}npm run cosg -- --rules
             {'\n'}npm test
           </code>
@@ -176,6 +178,14 @@ export function Cosg() {
           </Reveal>
         ))}
       </div>
+
+      <section className="mt-20">
+        <SectionTitle eyebrow="COS-G on the host" title="What this copy can see of this machine" />
+        <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-muted">
+          A ghost does not have to live in the tree. G reaches the machine under it: hardware present with no driver, a block in <code className="rounded-[5px] bg-surface-2 px-1 py-0.5">/etc/modprobe.d</code> that is not holding, a driver loaded for hardware that is not here, a DKMS record whose build will not survive the next reboot. A local install sweeps the computer it is installed on and answers here, so none of it needs a terminal first. The copy served from the website has no machine to read and says so.
+        </p>
+        <HostPanel />
+      </section>
 
       <section className="mt-20">
         <SectionTitle eyebrow="The doctrine, applied" title="COS-G on Red Queen itself" />
@@ -239,7 +249,7 @@ export function Cosg() {
             </div>
             <div>
               <dt className="text-[15px] font-medium text-fg">G — ghosts</dt>
-              <dd className="mt-1 text-[14.5px]">Checks symlinks leaving the tree, git hooks, lifecycle scripts, unignored secrets, executable files and oversized blobs.</dd>
+              <dd className="mt-1 text-[14.5px]">Checks symlinks leaving the tree, git hooks, lifecycle scripts, unignored secrets, executable files and oversized blobs — and, with <code className="rounded-[5px] bg-surface-2 px-1 py-0.5">--host</code>, the machine itself: bound and unbound hardware, blacklists, idle drivers and DKMS.</dd>
             </div>
           </dl>
           <div className="flex items-start gap-3 rounded-card border border-line bg-surface p-5 text-[14px] leading-relaxed">

@@ -25,6 +25,9 @@ export const INPUTS = [
   'scripts/postbuild.mjs',
   'scripts/build-offline.ts',
   'scripts/offline-server.mjs',
+  // build-offline transpiles this one into the bundle it ships, so its content
+  // is part of what a build produces even though it lives outside src/.
+  'scripts/host-scan.ts',
 ]
 
 export interface Stamp {
