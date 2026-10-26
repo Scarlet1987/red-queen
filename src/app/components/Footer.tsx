@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 
+import { RELEASE_TAG, RELEASE_VERSION, releaseLabel } from '../lib/release'
 import { Container } from './ui'
 import { Logo } from './Nav'
 
@@ -67,7 +68,16 @@ export function Footer() {
           ))}
         </div>
         <div className="mt-16 flex flex-col-reverse items-start justify-between gap-4 border-t border-line pt-6 sm:flex-row sm:items-center">
-          <p className="text-[13px] text-faint">© {new Date().getFullYear()} Red Queen. Nothing here executes your files.</p>
+          <div className="flex flex-col gap-2">
+            <p className="text-[13px] text-faint">© {new Date().getFullYear()} Red Queen. Nothing here executes your files.</p>
+            {/* The running copy names its own release: the version from
+                package.json and the tag the bytes were built from, both baked
+                in at build time. The title says it in words for a reader who
+                cannot see the dot. */}
+            <p className="text-[12.5px] text-faint" title={`Version ${RELEASE_VERSION || 'unknown'}${RELEASE_TAG ? `, release ${RELEASE_TAG}` : ', no release tag'}`}>
+              Version <span className="font-mono tabular-nums text-muted">{releaseLabel()}</span>
+            </p>
+          </div>
           <Logo className="text-muted" />
         </div>
       </Container>

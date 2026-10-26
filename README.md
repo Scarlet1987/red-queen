@@ -580,6 +580,11 @@ release tag the running bytes were built as, with no page rendering and no
 server state involved. The values are constants substituted at build time, so
 the answer comes from the bytes that are running rather than from a file or a
 lookup that could age.
+
+The footer says the same pair on every page — `Version 1.0.1 · v1.0.1` — so a
+copy running on metal, in a VM or offline names its own release without anyone
+curling the endpoint. A build no tag describes says `untagged build` there
+instead of borrowing the nearest release's name.
 A release is `npm run release`, then `sites_deploy` with `manifestPath`
 `dist/deploy.json` for the environment you are updating, then `npm run smoke`
 against that URL (pass it as an argument). There is no committed manifest: the
