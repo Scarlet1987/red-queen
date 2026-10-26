@@ -545,7 +545,7 @@ scripts/build-offline.ts   assembles dist/server, then stamps the build
 scripts/build-stamp.ts     hashes build inputs into dist/build.json
 scripts/deploy-gate.ts     blocks publishing a missing, stale or untested build
 scripts/smoke.ts           post-deploy smoke test of the published site
-scripts/release-log.ts     records a deployment's build hash and smoke result
+scripts/release-log.ts     records a deployment's build hash, smoke result and checks
 scripts/offline-server.mjs dependency-free static + API server
 public/images/             generated covers
 LICENSE                    MIT, for the code, the catalogue text and the covers
@@ -611,7 +611,8 @@ reports: a Worker replaced without its assets beside it would otherwise leave
 a footer naming a release the API denies. `npm run smoke -- https://…` checks another
 deployment; a 503 is reported as a hosting pause, not an app failure. What was
 deployed and how it answered is logged in [RELEASES.md](RELEASES.md) — build
-hash, release tag, environment and smoke result, one row per deployment, written by
+hash, release tag, environment, smoke result and the checks that run made, one row
+per deployment, written by
 `npm run release:log -- <environment>`. A status line above the table compares
 `dist/build.json` with the newest logged build, so a local build that was never
 deployed is called out in the log instead of being mistaken for the published

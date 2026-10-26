@@ -21,7 +21,7 @@ import {
   verifyLog,
   withStatus,
 } from '../scripts/release-log.ts'
-import type { Check } from '../scripts/smoke.ts'
+import { checkNames, type Check } from '../scripts/smoke.ts'
 
 // The release log is the only durable record of what was published, so the row
 // format and the placement rules are pinned: newest first, one row per build per
@@ -44,11 +44,18 @@ function checks(failed: string[] = []): Check[] {
   return ['shell', 'deployment', 'health', 'export'].map((name) => ({ name, ok: !failed.includes(name), detail: '' }))
 }
 
+/** The suite as it stands, and the cell a row written now carries. */
+const SUITE = checkNames()
+const MADE = SUITE.join(', ')
+const suiteChecks = (): Check[] => SUITE.map((name) => ({ name, ok: true, detail: '' }))
+
+const SEPARATOR = '| --- | --- | --- | --- | --- | --- | --- |'
+
 const HEADER = [
   '# Releases',
   '',
   HEADER_ROW,
-  '| --- | --- | --- | --- | --- | --- |',
+  SEPARATOR,
   '| 2026-10-24 20:31 | preview | served shell `6d49ada3b198` | — | 14/14 |',
   '',
 ].join('\n')
@@ -58,25 +65,32 @@ test('the short hash is the twelve characters after the algorithm', () => {
   assert.equal(shortHash(stamp({ hash: 'sha256:abcdef0123456789' })), 'abcdef012345')
 })
 
-test('a passing run logs time, environment, build, tag, runtime and full result', () => {
+test('a passing run logs time, environment, build, tag, runtime, result and checks', () => {
   const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18', tag: 'v1.0.0' })
-  assert.equal(row, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 |`)
+  assert.equal(row, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export |`)
 })
 
 test('a build no tag describes logs a dash rather than a guessed version', () => {
   const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18' })
-  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${TAG_UNKNOWN} | ${process.version} | 4/4 |`)
+  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${TAG_UNKNOWN} | ${process.version} | 4/4 | shell, deployment, health, export |`)
 })
 
 test('a stamp without a runtime logs a dash rather than the node running the tool', () => {
   const row = rowFor({ environment: 'preview', stamp: stamp({ node: '' }), checks: checks(), at: '2026-10-24 21:18', tag: 'v1.0.0' })
-  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${RUNTIME_UNKNOWN} | 4/4 |`)
+  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${RUNTIME_UNKNOWN} | 4/4 | shell, deployment, health, export |`)
   assert.ok(!row.includes(process.version), 'the Node that ran release:log is not the build runtime')
 })
 
-test('a failing run names the checks that failed', () => {
+test('a failing run names the checks that failed and still records them all', () => {
   const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(['health', 'deployment']), at: '2026-10-24 22:05', tag: 'v1.0.0' })
-  assert.equal(row, `| 2026-10-24 22:05 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 2/4 — failed: deployment, health |`)
+  assert.equal(row, `| 2026-10-24 22:05 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 2/4 — failed: deployment, health | shell, deployment, health, export |`)
+})
+
+test('a real run is recorded with every check it made, including the footer', () => {
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: SUITE.map((name) => ({ name, ok: true, detail: '' })), at: '2026-10-24 21:18', tag: 'v1.0.0' })
+  assert.ok(row.includes(`| ${SUITE.length}/${SUITE.length} | ${MADE} |`), 'the result and the check list travel together')
+  assert.ok(row.includes('footer'), 'the footer check is named in the row')
+  assert.ok(row.includes('health'), 'the health check is named in the row')
 })
 
 test('a new deployment goes directly under the header', () => {
@@ -87,7 +101,7 @@ test('a new deployment goes directly under the header', () => {
     '# Releases',
     '',
     HEADER_ROW,
-    '| --- | --- | --- | --- | --- | --- |',
+    SEPARATOR,
     row,
     '| 2026-10-24 20:31 | preview | served shell `6d49ada3b198` | — | 14/14 |',
     '',
@@ -97,7 +111,7 @@ test('a new deployment goes directly under the header', () => {
 test('re-checking a logged build updates its row and keeps the deployment time', () => {
   const logged = [
     HEADER_ROW,
-    '| --- | --- | --- | --- | --- | --- |',
+    SEPARATOR,
     '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 13/14 — failed: health |',
     '',
   ].join('\n')
@@ -106,7 +120,10 @@ test('re-checking a logged build updates its row and keeps the deployment time',
   assert.equal(result.replaced, true)
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 1)
   const dataRow = result.markdown.split('\n').find((line) => line.startsWith('| 2026'))
-  assert.equal(dataRow, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 |`)
+  assert.equal(
+    dataRow,
+    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export |`,
+  )
 })
 
 test('a row logged before the Node column is still found and gains one', () => {
@@ -121,12 +138,16 @@ test('a row logged before the Node column is still found and gains one', () => {
   assert.equal(result.replaced, true, 'an older row is still the same deployment')
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 1)
   const dataRow = result.markdown.split('\n').find((line) => line.startsWith('| 2026'))
-  assert.equal(dataRow, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 |`, 'the row is rewritten in the current shape')
-  assert.equal(dataRow?.split('|').length, 8, 'six cells: time, environment, build, tag, node, smoke')
+  assert.equal(
+    dataRow,
+    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export |`,
+    'the row is rewritten in the current shape',
+  )
+  assert.equal(dataRow?.split('|').length, 9, 'seven cells: time, environment, build, tag, node, smoke, checks')
 })
 
 test('the same environment on a different build is a second deployment', () => {
-  const logged = `${HEADER_ROW}\n| --- | --- | --- | --- | --- | --- |\n| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 14/14 |\n`
+  const logged = `${HEADER_ROW}\n${SEPARATOR}\n| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 14/14 |\n`
   const newer = rowFor({ environment: 'production', stamp: stamp({ hash: 'sha256:ffffffffffff0000' }), checks: checks(), at: '2026-10-25 09:00' })
   const result = place(logged, newer, 'production', 'ffffffffffff')
   assert.equal(result.replaced, false)
@@ -138,12 +159,14 @@ test('a log without the release table is refused instead of corrupted', () => {
   assert.throws(() => place('# Releases\n\nNothing here yet.\n', '| row |', 'production', 'abc'), /no release table/)
 })
 
+const LOGGED_ROW = `| 2026-10-24 21:29 | production | \`935e02c6b357\` — 1.0.0, built 21:28 | v1.0.0 | v24.17.0 | ${SUITE.length}/${SUITE.length} | ${MADE} |`
+
 const LOGGED = [
   '# Releases',
   '',
   HEADER_ROW,
-  '| --- | --- | --- | --- | --- | --- |',
-  '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | v1.0.0 | v24.17.0 | 14/14 |',
+  SEPARATOR,
+  LOGGED_ROW,
   '| 2026-10-24 20:31 | preview | served shell `6d49ada3b198` | — | 14/14 |',
   '',
 ].join('\n')
@@ -151,7 +174,14 @@ const LOGGED = [
 const current = () => stamp({ hash: 'sha256:935e02c6b3571111111111111111111111111111111111111111111111111111' })
 
 test('the newest logged build is the first row with a build hash', () => {
-  assert.deepEqual(newestBuild(LOGGED), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: 'v1.0.0', node: 'v24.17.0' })
+  assert.deepEqual(newestBuild(LOGGED), {
+    short: '935e02c6b357',
+    environment: 'production',
+    at: '2026-10-24 21:29',
+    tag: 'v1.0.0',
+    node: 'v24.17.0',
+    checks: SUITE,
+  })
   assert.equal(newestBuild(HEADER), null, 'a row naming only a served shell is not a build')
   assert.equal(newestBuild('no table'), null)
 })
@@ -163,7 +193,7 @@ test('a row logged before the Node column reports no runtime', () => {
     '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | 14/14 |',
     '',
   ].join('\n')
-  assert.deepEqual(newestBuild(legacy), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: '', node: '' })
+  assert.deepEqual(newestBuild(legacy), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: '', node: '', checks: [] })
 })
 
 test('a current build is reported as matching the newest logged build', () => {
@@ -302,7 +332,7 @@ test('a current row from before the tag column fails until it is re-logged', () 
   try {
     writeStampFile(root, current())
     // Five cells: the shape written between the Node column and this one.
-    const older = LOGGED.replace('| v1.0.0 | v24.17.0 |', '| v24.17.0 |')
+    const older = LOGGED.replace('| v1.0.0 | v24.17.0 |', '| v24.17.0 |').replace(`| ${SUITE.length}/${SUITE.length} | ${MADE} |`, '| 14/14 |')
     writeFileSync(join(root, 'RELEASES.md'), withStatus(older, current()))
 
     const verdict = verifyLog(root)
@@ -313,6 +343,53 @@ test('a current row from before the tag column fails until it is re-logged', () 
     const dashed = LOGGED.replace('| v1.0.0 |', `| ${TAG_UNKNOWN} |`)
     writeFileSync(join(root, 'RELEASES.md'), withStatus(dashed, current()))
     assert.deepEqual(verifyLog(root).problems, [])
+  } finally {
+    cleanup()
+  }
+})
+
+test('a current row that names fewer checks than the suite fails', () => {
+  const { root, cleanup } = project()
+  try {
+    writeStampFile(root, current())
+
+    // A row whose run never looked at the footer is not evidence the footer was
+    // checked, even when it reports every check it did make as green.
+    const shortened = LOGGED.replace('footer, ', '').replace(`${SUITE.length}/${SUITE.length}`, `${SUITE.length - 1}/${SUITE.length - 1}`)
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(shortened, current()))
+    const verdict = verifyLog(root)
+    assert.equal(verdict.ok, false)
+    assert.match(verdict.problems.join('\n'), /records 14 smoke checks, but the suite makes 15 — missing: footer — re-log the deployment/)
+
+    // A name no longer in the suite says the row is from another version of it.
+    const padded = LOGGED.replace(`| ${MADE} |`, `| ${MADE}, legacy check |`)
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(padded, current()))
+    assert.match(verifyLog(root).problems.join('\n'), /no longer in the suite: legacy check/)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a current row written before the check column fails until it is re-logged', () => {
+  const { root, cleanup } = project()
+  try {
+    writeStampFile(root, current())
+    // Six cells: time, environment, build, tag, node, smoke — the shape that
+    // existed before the row had to say which checks it made.
+    const before = LOGGED.replace(
+      LOGGED_ROW,
+      '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | v1.0.0 | v24.17.0 | 14/14 |',
+    )
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(before, current()))
+    const verdict = verifyLog(root)
+    assert.equal(verdict.ok, false)
+    assert.match(verdict.problems.join('\n'), /does not record which smoke checks ran — re-log the deployment to name them/)
+
+    // Re-logging the same deployment adds the list and keeps its time.
+    const rewritten = place(before, rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), at: '2026-10-25 09:00' }), 'production', '935e02c6b357').markdown
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(rewritten, current()))
+    assert.deepEqual(verifyLog(root).problems, [])
+    assert.match(readFileSync(join(root, 'RELEASES.md'), 'utf8'), /\| 2026-10-24 21:29 \| production \|.*footer, export, export empty \|/, 'the re-logged row names the suite')
   } finally {
     cleanup()
   }
@@ -334,7 +411,7 @@ test('a legacy row for the current build fails until it is re-logged', () => {
     assert.match(verifyLog(root).problems.join('\n'), /does not record the Node that built it/)
 
     // Re-logging rewrites that row in the current shape, and the check passes.
-    const row = rowFor({ environment: 'production', stamp: current(), checks: checks(), at: '2026-10-25 09:00' })
+    const row = rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), at: '2026-10-25 09:00' })
     const rewritten = place(legacy, row, 'production', '935e02c6b357').markdown
     writeFileSync(join(root, 'RELEASES.md'), withStatus(rewritten, current()))
     assert.deepEqual(verifyLog(root).problems, [])

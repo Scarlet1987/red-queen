@@ -19,7 +19,11 @@ names the version it was made on. Rows logged before a column existed show
 `—`: the runtime or the version of those builds was not recorded, and this log
 does not invent one. **Smoke** is that run's result; every run includes the
 byte-for-byte comparison of the served shell with `dist/client/index.html`.
-Environment URLs are in [README.md](README.md#version-102-hosted).
+**Checks** names every check that run made, in order — so a row is evidence that
+the footer and health checks happened, not just that a count came back green.
+Rows logged before the column existed stop at **Smoke**: their runs made fewer
+checks and nothing here can say which. Environment URLs are in
+[README.md](README.md#version-102-hosted).
 
 The **Build status** line above the table is the drift flag: it compares
 `dist/build.json` with the newest build in the table, names both hashes when
@@ -31,18 +35,19 @@ logged. `npm run release` refreshes it, so a rebuild shows up immediately as
 `npm run release:check` is the CI form. It is read-only and exits non-zero
 when the newest logged build is not `dist/build.json`, when that row does not
 record the Node that built it — a dash where a version belongs — when that row
-has no tag column at all, or when the status line is missing or stale. A
-freshly written mismatch line is still a failure: an honest warning is not a
-deployment. The Node and tag rules bind only to the row for the current build,
-and a dashed tag on that row passes: a build can ship before any tag names it.
-The dashes on older rows are history, not drift.
+has no tag column at all, when that row does not name the smoke checks it made
+or names a set the suite no longer makes, or when the status line is missing or
+stale. A freshly written mismatch line is still a failure: an honest warning is
+not a deployment. The Node, tag and check rules bind only to the row for the
+current build, and a dashed tag on that row passes: a build can ship before any
+tag names it. The dashes and short rows on older rows are history, not drift.
 
 > **Build status:** `dist/build.json` is `ae12da6ac2db`, which matches the newest logged build.
 
-| Deployed (UTC) | Environment | Build | Tag | Node | Smoke |
-| --- | --- | --- | --- | --- | --- |
-| 2026-10-26 02:51 | production | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 14/14 |
-| 2026-10-26 02:51 | preview | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 14/14 |
+| Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-26 02:51 | production | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty |
+| 2026-10-26 02:51 | preview | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty |
 | 2026-10-26 01:23 | production | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |
 | 2026-10-26 01:23 | preview | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |
 | 2026-10-25 23:30 | preview | `5c17c5487276` — 1.0.0, built 23:27 | v1.0.0-4-g7bfd380 | v24.17.0 | 14/14 |

@@ -19,6 +19,11 @@
 // this build's. A build no tag describes logs a dash, which is a fact rather
 // than a gap.
 //
+// The row also names every smoke check the run made, in order, so a logged
+// release is evidence that the footer and health checks happened — not merely
+// that some run was green. release:check compares that list with the suite, so
+// a row written by an older, shorter smoke is re-logged rather than trusted.
+//
 // A status line above the table says whether dist/build.json still matches the
 // newest logged build. The gate refreshes it as part of npm run release, so a
 // rebuild that has not been deployed shows up in the log instead of being
@@ -29,7 +34,7 @@ import { fileURLToPath } from 'node:url'
 
 import { readStamp, type Stamp } from './build-stamp.ts'
 import { resolveTag, TAG_UNKNOWN } from './release-tag.ts'
-import { DEFAULT_BASE, smoke, type Check } from './smoke.ts'
+import { checkNames, DEFAULT_BASE, smoke, type Check } from './smoke.ts'
 
 // Re-exported so the log is still the one place a caller reads a release from.
 export { resolveTag, TAG_UNKNOWN }
@@ -52,16 +57,17 @@ export const STATUS = '> **Build status:**'
 /** A row logged before the runtime column existed, or by a stamp that lost it. */
 export const RUNTIME_UNKNOWN = '—'
 
-/** Deployed, Environment, Build, Tag, Node, Smoke: the shape written now. */
-const COLUMNS = 6
-export const HEADER_ROW = '| Deployed (UTC) | Environment | Build | Tag | Node | Smoke |'
+/** Deployed, Environment, Build, Tag, Node, Smoke, Checks: the shape written now. */
+const COLUMNS = 7
+export const HEADER_ROW = '| Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks |'
 
 /**
  * A row keeps the shape it was written in; a missing column is filled in when
- * that deployment is logged again, never by rewriting history. Six cells is
- * current, five predates the tag, four also predates the Node.
+ * that deployment is logged again, never by rewriting history. Seven cells is
+ * current, six predates the check list, five also predates the tag, four also
+ * predates the Node.
  */
-const SHAPES = [COLUMNS, COLUMNS - 1, COLUMNS - 2]
+const SHAPES = [COLUMNS, COLUMNS - 1, COLUMNS - 2, COLUMNS - 3]
 
 function isReleaseRow(parts: string[]): boolean {
   return SHAPES.includes(parts.length)
@@ -69,9 +75,23 @@ function isReleaseRow(parts: string[]): boolean {
 
 /** Where the Node sits depends on the shape of the row it is in. */
 function nodeCell(parts: string[]): string {
-  if (parts.length === COLUMNS) return parts[4]
-  if (parts.length === COLUMNS - 1) return parts[3]
+  if (parts.length >= COLUMNS - 1) return parts[4]
+  if (parts.length === COLUMNS - 2) return parts[3]
   return ''
+}
+
+/** The tag only exists once the row is at least five cells wide. */
+function tagCell(parts: string[]): string {
+  return parts.length >= COLUMNS - 1 ? parts[3] : ''
+}
+
+/** The check list only exists in a row written now. */
+function checksCell(parts: string[]): string[] {
+  if (parts.length !== COLUMNS) return []
+  return parts[6]
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0)
 }
 
 /** UTC, minute precision: "2026-10-24 21:18". */
@@ -95,6 +115,9 @@ export function rowFor(input: { environment: Environment; stamp: Stamp; checks: 
   const failed = input.checks.filter((check) => !check.ok)
   const total = input.checks.length
   const result = failed.length === 0 ? `${total}/${total}` : `${total - failed.length}/${total} — failed: ${failed.map((check) => check.name).join(', ')}`
+  // Every check the run made, in order: the result says how many passed, this
+  // says which ones were attempted. Together they are the row's evidence.
+  const made = input.checks.map((check) => check.name).join(', ')
   const build = `\`${shortHash(input.stamp)}\` — ${input.stamp.version}, built ${utc(input.stamp.builtAt).slice(11)}`
   // The stamp is written by the build itself, so this is the Node that produced
   // these bytes — not whichever Node happens to run this script.
@@ -102,7 +125,7 @@ export function rowFor(input: { environment: Environment; stamp: Stamp; checks: 
   // The tag describes the build, so a caller that knows it may pass it in; the
   // log command reads it from the stamp instead of trusting the operator's memory.
   const tag = input.tag ?? TAG_UNKNOWN
-  return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${tag} | ${node} | ${result} |`
+  return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${tag} | ${node} | ${result} | ${made} |`
 }
 
 export interface Placed {
@@ -153,6 +176,11 @@ export interface NewestBuild {
    * before the column, or a dash written by a stamp that had no runtime.
    */
   node: string
+  /**
+   * The smoke checks the run made, as logged. Empty for a row written before
+   * the column: nothing there says which checks happened.
+   */
+  checks: string[]
 }
 
 /** The build in the first data row: the most recent deployment logged. */
@@ -167,9 +195,9 @@ export function newestBuild(markdown: string): NewestBuild | null {
     if (!isReleaseRow(parts)) continue
     const match = parts[2].match(/`([0-9a-f]{6,64})` — /)
     if (!match) continue
-    const tag = parts.length === COLUMNS ? parts[3] : ''
+    const tag = tagCell(parts)
     const node = nodeCell(parts)
-    return { short: match[1], environment: parts[1], at: parts[0], tag, node: node === RUNTIME_UNKNOWN ? '' : node }
+    return { short: match[1], environment: parts[1], at: parts[0], tag, node: node === RUNTIME_UNKNOWN ? '' : node, checks: checksCell(parts) }
   }
   return null
 }
@@ -264,6 +292,28 @@ export function verifyLog(root: string = ROOT, file?: string): VerifyResult {
       `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) does not record the release tag — re-log the deployment to fill the column.`,
     )
   }
+  // The row has to name the checks that ran, and they have to be this suite's.
+  // A count alone would let a row claim a green run that never looked at the
+  // footer; a list from an older suite would claim checks that no longer exist.
+  if (build && newest && newest.short === build) {
+    const suite = checkNames()
+    if (newest.checks.length === 0) {
+      problems.push(
+        `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) does not record which smoke checks ran — re-log the deployment to name them.`,
+      )
+    } else {
+      const missing = suite.filter((name) => !newest.checks.includes(name))
+      const retired = newest.checks.filter((name) => !suite.includes(name))
+      if (missing.length || retired.length) {
+        const detail = [`records ${newest.checks.length} smoke checks, but the suite makes ${suite.length}`]
+        if (missing.length) detail.push(`missing: ${missing.join(', ')}`)
+        if (retired.length) detail.push(`no longer in the suite: ${retired.join(', ')}`)
+        problems.push(
+          `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) ${detail.join(' — ')} — re-log the deployment so the row proves what ran.`,
+        )
+      }
+    }
+  }
 
   const line = markdown.split('\n').find((entry) => entry.startsWith(STATUS))
   if (!line) problems.push('the build status line is missing — run npm run release:log -- --status.')
@@ -340,6 +390,7 @@ if (invokedDirectly) {
     // The runtime the deployment was logged with, not the one running this check.
     if (verdict.newest) console.log(`  runtime ${verdict.newest.node || 'not recorded'}`)
     if (verdict.newest) console.log(`  tag     ${verdict.newest.tag || 'not recorded'}`)
+    if (verdict.newest) console.log(`  checks  ${verdict.newest.checks.length ? `${verdict.newest.checks.length} recorded` : 'not recorded'}`)
     console.log('')
     if (verdict.ok) {
       console.log(`  ok      ${verdict.status.replace(`${STATUS} `, '')}`)

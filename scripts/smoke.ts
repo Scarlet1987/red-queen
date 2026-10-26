@@ -39,6 +39,26 @@ export function buildRelease(root: string = ROOT): Release | null {
 /** The first slug of each safety level, so a section heading must appear. */
 const SLUGS = ['ghidra', 'radare2', 'frida']
 const ROUTES = ['/directory', '/tool/ghidra', '/rack', '/safety', '/cosg', '/cosg/worksheet']
+
+/**
+ * The checks a run makes, in order. RELEASES.md writes this list into every row
+ * so a logged release proves what was checked, not merely how many passed; a
+ * test pins it to the run itself so the two cannot drift.
+ */
+export function checkNames(): string[] {
+  return [
+    'shell',
+    'deployment',
+    'bundle',
+    'styles',
+    ...ROUTES.map((path) => `route ${path}`),
+    'cover',
+    'health',
+    'footer',
+    'export',
+    'export empty',
+  ]
+}
 const UNKNOWN = 'not-a-catalogue-tool'
 const NOTE = 'Run it in the air-gapped VM, never on the host.'
 const TIMEOUT_MS = 15_000

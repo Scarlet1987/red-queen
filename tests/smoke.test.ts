@@ -8,7 +8,7 @@ import { test } from 'node:test'
 
 import { bySlug, safetyMeta } from '../src/data/tools.ts'
 import { rackMarkdown, type RackTool } from '../src/lib/rack-markdown.ts'
-import { smoke, type Check } from '../scripts/smoke.ts'
+import { checkNames, smoke, type Check } from '../scripts/smoke.ts'
 
 // The smoke test is the only check that sees the site after it is published, so
 // it is tested the way it fails: a local fixture that behaves like the Worker
@@ -182,6 +182,13 @@ test('a healthy site passes every check', async () => {
     assert.match(find(checks, 'footer').detail, /bundle names 1\.0\.0 · v1\.0\.0 — the same release \/api\/health reports/)
     assert.match(find(checks, 'export').detail, /3 tools · refinement kept/)
     assert.match(find(checks, 'export empty').detail, /Your rack is empty/)
+  })
+})
+
+test('the recorded check names are the checks a run actually makes', async () => {
+  await withFixture({}, async (base, shellPath) => {
+    const names = (await smoke(base, { shellPath, release: RELEASE })).map((entry) => entry.name)
+    assert.deepEqual(names, checkNames(), 'RELEASES.md lists these names, so they cannot drift from the run')
   })
 })
 
