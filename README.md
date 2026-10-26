@@ -172,7 +172,7 @@ smoke`: seven checks that this copy works where it is running — local storage,
 the saved rack and refinements through their validators, the catalogue (38 tools,
 unique slugs, known categories and levels), covers loading as SVG, `POST
 /api/export` returning Markdown with a refinement note kept, `/api/health` — whose
-answer names the release (`red-queen · hosted · 1.0.1 · v1.0.1`) — and your model
+answer names the release (`red-queen · hosted · 1.0.2 · v1.0.2`) — and your model
 endpoint when one is configured. It reads only: the single write is a
 probe key it removes again, and no project folder is touched. Results stay on
 screen with timings, so a test launch can be reported by reading them out — 6 of
@@ -218,7 +218,7 @@ curl -fsSL … | sh -s -- --mode vm             # arguments go after `--`
 
 - The clone source is `--repo URL` (or `RED_QUEEN_REPO`), `--source DIR` says
   where to clone it, `--ref` which branch or tag. All have defaults: the URL
-  points at the repository this file is published from, and the ref is `v1.0.1`
+  points at the repository this file is published from, and the ref is `v1.0.2`
   — the tagged release — so an install today and one in a month are the same
   program. `--ref main` follows the branch instead.
 - It is idempotent: run it again and it finds the existing install and starts it
@@ -558,19 +558,20 @@ The look and feel started from the **Store** starter template (editorial
 layout, Instrument Serif display type, warm paper canvas) and was re-themed
 around a crimson accent and the three safety tones.
 
-## Version 1.0.1, hosted
+## Version 1.0.2, hosted
 
-Red Queen 1.0.1 is live and needs no install. It is the release that names
-itself: `/api/health` reports the version and tag the running bytes were built
-as, and both environments answer with the same pair.
+Red Queen 1.0.2 is live and needs no install. It is the release that names
+itself in the page as well as at the endpoint: the footer carries the version
+and tag the running bytes were built as, and `/api/health` answers with the
+same pair.
 
 - **Production** — **https://site-7b563dd9b57543d58f4ee10986624b94.freebuff.page**
 - **Preview** — https://site-66228069b13847cc95a835f233ca293e.freebuff.page
 
 Site `1710b6be-1a28-4f44-ba17-420cb5e348b8` on Freebuff Sites; both
 environments are published and serve the same build (shell SHA-256
-`28484d10…`), and both answer `/api/health` with the same release —
-`{"ok":true,"service":"red-queen","version":"1.0.1","tag":"v1.0.1"}`
+`dcb0090b…`), and both answer `/api/health` with the same release —
+`{"ok":true,"service":"red-queen","version":"1.0.2","tag":"v1.0.2"}`
 as that build was logged. The installer pins the same tag, so a one-command
 install and the hosted site are the same program.
 
@@ -581,7 +582,7 @@ server state involved. The values are constants substituted at build time, so
 the answer comes from the bytes that are running rather than from a file or a
 lookup that could age.
 
-The footer says the same pair on every page — `Version 1.0.1 · v1.0.1` — so a
+The footer says the same pair on every page — `Version 1.0.2 · v1.0.2` — so a
 copy running on metal, in a VM or offline names its own release without anyone
 curling the endpoint. A build no tag describes says `untagged build` there
 instead of borrowing the nearest release's name.

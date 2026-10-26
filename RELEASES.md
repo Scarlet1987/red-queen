@@ -19,7 +19,7 @@ names the version it was made on. Rows logged before a column existed show
 `—`: the runtime or the version of those builds was not recorded, and this log
 does not invent one. **Smoke** is that run's result; every run includes the
 byte-for-byte comparison of the served shell with `dist/client/index.html`.
-Environment URLs are in [README.md](README.md#version-101-hosted).
+Environment URLs are in [README.md](README.md#version-102-hosted).
 
 The **Build status** line above the table is the drift flag: it compares
 `dist/build.json` with the newest build in the table, names both hashes when
@@ -37,10 +37,12 @@ deployment. The Node and tag rules bind only to the row for the current build,
 and a dashed tag on that row passes: a build can ship before any tag names it.
 The dashes on older rows are history, not drift.
 
-> **Build status:** `dist/build.json` is `71ff1b4f67a7`, which matches the newest logged build.
+> **Build status:** `dist/build.json` is `ae12da6ac2db`, which matches the newest logged build.
 
 | Deployed (UTC) | Environment | Build | Tag | Node | Smoke |
 | --- | --- | --- | --- | --- | --- |
+| 2026-10-26 02:51 | production | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 14/14 |
+| 2026-10-26 02:51 | preview | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 14/14 |
 | 2026-10-26 01:23 | production | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |
 | 2026-10-26 01:23 | preview | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |
 | 2026-10-25 23:30 | preview | `5c17c5487276` — 1.0.0, built 23:27 | v1.0.0-4-g7bfd380 | v24.17.0 | 14/14 |
@@ -66,10 +68,10 @@ The dashes on older rows are history, not drift.
 | 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | — | — | 14/14 |
 | 2026-10-24 20:31 | preview | served shell `6d49ada3b198`; build stamp not recorded (log started later) | — | 14/14 |
 
-Latest deployment receipts: preview `104ad627-f37e-48bd-9882-1db6378d2989`,
-production `2e0a1a1a-f7f0-4d07-8193-ea287306f7d5` (earlier: `4a1b4db1…`,
-`dd733c2c…`, `a23b6818…`). Both environments serve the `71ff1b4f67a7` build,
-whose shell hash is `28484d10303f` — the served page and
+Latest deployment receipts: preview `e9a6f34b-e339-4294-90e0-b9a82e285cdf`,
+production `6835613c-cc0c-4eba-bc50-d14dc394eb8e` (earlier: `104ad627…`,
+`2e0a1a1a…`, `4a1b4db1…`). Both environments serve the `ae12da6ac2db` build,
+whose shell hash is `dcb0090bd0d1` — the served page and
 `dist/client/index.html` hash the same, which is what the smoke test asserts.
 
 ## Recording a release
