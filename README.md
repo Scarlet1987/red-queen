@@ -119,9 +119,18 @@ package rather than each version, since dkms keeps superseded versions around
 and an idle old one is harmless while the current one works; a package whose
 every record has lost its source is reported once, as that, and not again.
 
+A block that is not doing its job is its own ghost. `/proc/modules` is read, so
+a module named in `/etc/modprobe.d` that is loaded right now is reported as
+`blacklist-ineffective`, with what is holding it: pulled in by a dependency
+(which is named), in use, or nothing at all. `blacklist` only stops the
+alias-driven autoload, so a softdep, an explicit `modprobe` or a load from
+before the file was written all leave the module running — which is why the
+finding says whether to unload it or go and fix what loads it. A blocked module
+that is not loaded keeps the quieter note that the block is deliberate.
+
 The text report counts blacklisted modules per file, because a stock distro
 blocks a hundred of them and the list would bury the finding that matters;
-`--json` carries the full device, blacklist and DKMS detail. Host findings are
+`--json` carries the full device, blacklist, loaded-module and DKMS detail. Host findings are
 warnings, so `--host` never fails a build — `--strict` is the exception. The
 sweep needs Linux sysfs and says so plainly, then reports nothing, elsewhere.
 

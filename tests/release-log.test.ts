@@ -65,6 +65,7 @@ const host = (findings: HostFinding[] = [], available = true): HostReport => ({
       ]
     : [],
   blacklists: [],
+  loaded: [],
   dkms: [],
   findings,
 })

@@ -3,7 +3,8 @@
 //
 //   Which PCI hardware has a driver, and which is present but dark?
 //   Which driver modules are blocked from loading, and is that blocking
-//   hardware that is currently without one?
+//   hardware that is currently without one — or is the block not taking
+//   effect because the module is loaded anyway?
 //   Which DKMS records have lost the source behind them, so `dkms status`
 //   errors instead of reporting — and which are not built for the kernel you
 //   are running, so their modules will not be there after a reboot?
@@ -15,7 +16,7 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from 'n
 import { release } from 'node:os'
 import { basename, join } from 'node:path'
 
-export type HostRule = 'unbound-hardware' | 'blacklisted-driver' | 'stale-dkms' | 'dkms-not-built'
+export type HostRule = 'unbound-hardware' | 'blacklisted-driver' | 'blacklist-ineffective' | 'stale-dkms' | 'dkms-not-built'
 
 export interface HostFinding {
   rule: HostRule
@@ -45,6 +46,14 @@ export interface HostBlacklist {
   line: number
 }
 
+export interface HostModule {
+  name: string
+  /** How many things hold a reference to it, from /proc/modules. */
+  used: number
+  /** Loaded modules that list it as a dependency. */
+  dependents: string[]
+}
+
 export interface HostDkms {
   name: string
   version: string
@@ -62,6 +71,8 @@ export interface HostReport {
   kernel: string
   devices: HostDevice[]
   blacklists: HostBlacklist[]
+  /** What is loaded right now, from /proc/modules. */
+  loaded: HostModule[]
   dkms: HostDkms[]
   findings: HostFinding[]
 }
@@ -75,6 +86,8 @@ export interface HostOptions {
   dkms?: string
   /** Defaults to /lib/modules/<running kernel>. */
   modules?: string
+  /** Defaults to /proc/modules. */
+  procModules?: string
   /** Defaults to the pci.ids files a distro ships. */
   ids?: string[]
   /** Defaults to the running kernel. */
@@ -261,6 +274,30 @@ function readDkms(root: string): HostDkms[] {
   return records
 }
 
+/**
+ * /proc/modules, one line per loaded module: `name size instances deps state
+ * address`. The deps field is `-` or a comma list, which is how a module a
+ * blacklist should have kept out can still be named as somebody's dependency.
+ */
+function readModules(path: string): HostModule[] {
+  const text = read(path)
+  if (!text) return []
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length >= 4)
+  const modules: HostModule[] = lines.map((parts) => {
+    const used = Number.parseInt(parts[2], 10)
+    return { name: parts[0], used: Number.isNaN(used) ? 0 : used, dependents: [] }
+  })
+  const byName = new Map(modules.map((module) => [module.name, module]))
+  for (const parts of lines) {
+    if (!parts[3] || parts[3] === '-') continue
+    for (const dep of parts[3].split(',')) byName.get(dep.trim())?.dependents.push(parts[0])
+  }
+  return modules.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 /** The modules whose aliases claim a device, loaded or not. */
 function claimants(aliases: Alias[], modalias: string): string[] {
   if (!modalias) return []
@@ -314,6 +351,28 @@ export function summarizeHost(report: HostReport): HostSummary {
   return { cell: `${count} — ${rules.join(', ')} on ${report.kernel}`, warnings }
 }
 
+/**
+ * A module a blacklist should have kept out, found in /proc/modules. The state
+ * names what is holding it, because the remedy differs: a softdep or an
+ * explicit modprobe has to be fixed at its source, while a module nothing needs
+ * can simply be unloaded.
+ */
+function loadedAnyway(module: string, live: HostModule, blacklists: HostBlacklist[]): HostFinding {
+  const files = [...new Set(blacklists.filter((entry) => entry.module === module).map((entry) => basename(entry.file)))]
+  const why =
+    live.dependents.length > 0
+      ? ` (pulled in by ${list(live.dependents)})`
+      : live.used > 0
+        ? ` (in use by ${live.used})`
+        : ' (nothing depends on it)'
+  return {
+    rule: 'blacklist-ineffective',
+    severity: 'warn',
+    message: `${module} is blacklisted in ${list(files)} but is loaded right now${why} — a blacklist only stops alias loading, so a softdep or an explicit modprobe still gets it in. rmmod ${module} once nothing needs it, or fix whatever loads it.`,
+    file: blacklists.find((entry) => entry.module === module)?.file,
+  }
+}
+
 export function scanHost(options: HostOptions = {}): HostReport {
   const pciRoot = options.pci ?? '/sys/bus/pci/devices'
   const modprobeRoot = options.modprobe ?? '/etc/modprobe.d'
@@ -328,6 +387,7 @@ export function scanHost(options: HostOptions = {}): HostReport {
       kernel,
       devices: [],
       blacklists: [],
+      loaded: [],
       dkms: [],
       findings: [],
     }
@@ -352,6 +412,8 @@ export function scanHost(options: HostOptions = {}): HostReport {
   }
 
   const blacklists = readBlacklists(modprobeRoot)
+  const loaded = readModules(options.procModules ?? '/proc/modules')
+  const live = new Map(loaded.map((module) => [module.name, module]))
   const dkms = readDkms(dkmsRoot)
   const aliases = readAliases(join(modulesRoot, 'modules.alias'))
   const findings: HostFinding[] = []
@@ -400,13 +462,20 @@ export function scanHost(options: HostOptions = {}): HostReport {
   }
 
   // A blacklist is not only a fault: blocking one driver so another can own the
-  // device is the intended setup. Say so, rather than leave the entry unread.
+  // device is the intended setup. Say so, rather than leave the entry unread —
+  // unless the blocked module is loaded anyway, which is the finding that
+  // matters: the block is not doing anything.
   for (const device of devices) {
     if (!device.driver) continue
     for (const module of claims.get(device.slot) ?? []) {
       const entry = blocked.get(module)
       if (!entry || explained.has(module)) continue
       explained.add(module)
+      const running = live.get(module)
+      if (running) {
+        findings.push(loadedAnyway(module, running, blacklists))
+        continue
+      }
       findings.push({
         rule: 'blacklisted-driver',
         severity: 'info',
@@ -414,6 +483,18 @@ export function scanHost(options: HostOptions = {}): HostReport {
         file: entry.file,
       })
     }
+  }
+
+  // Modules a blacklist should have kept out that are loaded right now. A
+  // `blacklist` line only stops alias-driven autoloading, so a softdep, an
+  // explicit modprobe or a load from before the file was written leaves the
+  // module running; nothing else in the sweep would notice.
+  for (const module of blocked.keys()) {
+    if (explained.has(module)) continue
+    const running = live.get(module)
+    if (!running) continue
+    explained.add(module)
+    findings.push(loadedAnyway(module, running, blacklists))
   }
 
   for (const record of dkms) {
@@ -456,5 +537,5 @@ export function scanHost(options: HostOptions = {}): HostReport {
     })
   }
 
-  return { available: true, reason: '', kernel, devices, blacklists, dkms, findings }
+  return { available: true, reason: '', kernel, devices, blacklists, loaded, dkms, findings }
 }

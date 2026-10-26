@@ -57,6 +57,7 @@ function scan(root: string) {
     modprobe: join(root, 'etc', 'modprobe.d'),
     dkms: join(root, 'var', 'lib', 'dkms'),
     modules: join(root, 'lib', 'modules', '7.2.6'),
+    procModules: join(root, 'proc', 'modules'),
     kernel: '7.2.6',
     // No pci.ids in a fixture: the ids stand in, and the test asserts on those.
     ids: [],
@@ -120,6 +121,47 @@ test('hardware with no candidate module and no blacklist says so', () => {
   const [finding] = scan(root).findings
   assert.equal(finding.rule, 'unbound-hardware')
   assert.match(finding.message, /no module in .*lib\/modules\/7\.2\.6 claims it/)
+})
+
+test('a blacklisted module that is loaded anyway is a ghost, not a deliberate block', () => {
+  // The block is written, the module is running, and it is running because the
+  // driver that does own the NIC pulls it in — the block lost to a dependency.
+  const root = fixture(
+    {
+      ...device('0000:6f:00.0', '020000', '10ec', '8125', NIC_MODALIAS),
+      'etc/modprobe.d/blacklist-r8169.conf': 'blacklist r8169\n',
+      'lib/modules/7.2.6/modules.alias': ALIASES,
+      // r8125's deps field names r8169, so r8169 is the one being pulled in.
+      'proc/modules': 'r8125 1234567 0 r8169, Live 0x0\nr8169 987654 1 - Live 0x0\n',
+    },
+    { 'sys/0000:6f:00.0/driver': '../drivers/r8125' },
+  )
+
+  const report = scan(root)
+  assert.deepEqual(report.findings.map((finding) => finding.rule), ['blacklist-ineffective'], 'the deliberate-block note is replaced, not doubled')
+  const [finding] = report.findings
+  assert.equal(finding.severity, 'warn')
+  assert.match(finding.message, /^r8169 is blacklisted in blacklist-r8169\.conf but is loaded right now \(pulled in by r8125\)/)
+  assert.match(finding.message, /rmmod r8169 once nothing needs it/)
+  assert.equal(finding.file?.endsWith('blacklist-r8169.conf'), true, 'the file named is the one that blocks it')
+  assert.deepEqual(report.loaded.map((module) => module.name), ['r8125', 'r8169'], 'the loaded table is carried too')
+})
+
+test('a blacklisted module nothing depends on reports what is holding it', () => {
+  const root = fixture(
+    {
+      ...device('0000:0b:00.0', '030000', '1002', '67df', GPU_MODALIAS),
+      'etc/modprobe.d/blacklist.conf': 'blacklist pcspkr\nblacklist floppy\n',
+      'lib/modules/7.2.6/modules.alias': ALIASES,
+      'proc/modules': 'pcspkr 16384 2 - Live 0x0\n',
+    },
+    { 'sys/0000:0b:00.0/driver': '../drivers/amdgpu' },
+  )
+
+  const report = scan(root)
+  assert.deepEqual(report.findings.map((finding) => finding.rule), ['blacklist-ineffective'])
+  assert.match(report.findings[0].message, /pcspkr is blacklisted in blacklist\.conf but is loaded right now \(in use by 2\)/)
+  assert.ok(!report.findings[0].message.includes('floppy'), 'a block that is working is not reported')
 })
 
 test('a blacklist over hardware served by another driver is information, not a fault', () => {
@@ -286,6 +328,7 @@ test('the summary counts warnings by rule, names the kernel, and collapses repea
     kernel: '7.2.6',
     devices: [],
     blacklists: [],
+    loaded: [],
     dkms: [],
     findings: [warn('dkms-not-built'), warn('dkms-not-built'), warn('unbound-hardware')],
   }

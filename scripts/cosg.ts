@@ -551,6 +551,7 @@ function markdown(): string {
       }
       lines.push('')
       lines.push(`Blacklisted: ${blacklistSummary(host.blacklists)}.`)
+      lines.push(`${host.loaded.length} modules loaded right now.`)
       lines.push('')
       for (const record of host.dkms) {
         const built = record.built.length === 0 ? 'built for no kernel' : `built for ${record.built.join(', ')}`
@@ -591,6 +592,7 @@ if (asJson) {
         console.log(`  ${device.slot}  ${device.kind.padEnd(18)} ${(device.driver ?? '—').padEnd(18)} ${device.name}`)
       }
       console.log(`  blacklisted: ${blacklistSummary(host.blacklists)}`)
+      console.log(`  loaded: ${host.loaded.length} modules right now`)
       for (const record of host.dkms) {
         const built = record.built.length === 0 ? 'built for no kernel' : `built for ${record.built.join(', ')}`
         console.log(`  dkms ${record.name} ${record.version}: ${record.conf ? 'source present' : 'source missing'}; ${built}`)
