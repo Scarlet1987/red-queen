@@ -76,6 +76,7 @@ npm run cosg -- . --json             # machine-readable findings
 npm run cosg -- . --report cosg.md   # write a Markdown report
 npm run cosg -- . --strict           # non-zero exit on any finding
 npm run cosg -- --rules              # print the loop for each pass
+npm run cosg -- . --host             # G, plus this machine's drivers and DKMS
 ```
 
 Every pass runs the same loop: **define the problem → select one course of
@@ -100,6 +101,38 @@ has an *Own functions* section).
 
 The checker never executes, edits or deletes what it scans. It exits non-zero
 when syntax errors are found; `--strict` makes any finding fail the run.
+
+### Host drivers
+
+`--host` widens G from the tree to the machine under it, read-only: every PCI
+device and the driver bound to it, modules blocked in `/etc/modprobe.d/*.conf`,
+and DKMS records whose `source/dkms.conf` is gone, the state that makes
+`dkms status` fail. A network, storage, display or multimedia
+device with no driver is reported once, named after the blacklist that claims it
+when a blocked module would have driven it; an ordinary unclaimed bridge is not
+a finding, and dkms's empty `kernel-<ver>-<arch>` markers are not mistaken for
+version records. Names come from `pci.ids` when the distro ships one.
+
+A DKMS package with no build for the kernel you are running is a warning too:
+after a reboot into it, the module would not be there. The rule judges the
+package rather than each version, since dkms keeps superseded versions around
+and an idle old one is harmless while the current one works; a package whose
+every record has lost its source is reported once, as that, and not again.
+
+The text report counts blacklisted modules per file, because a stock distro
+blocks a hundred of them and the list would bury the finding that matters;
+`--json` carries the full device, blacklist and DKMS detail. Host findings are
+warnings, so `--host` never fails a build — `--strict` is the exception. The
+sweep needs Linux sysfs and says so plainly, then reports nothing, elsewhere.
+
+The same sweep runs as part of `npm run release:log`, so every release row
+records what the machine that made it reported: `clean — 23 devices on 7.2.6`,
+`2 warnings — unbound-hardware, dkms-not-built on 7.2.6`, or
+`unavailable — no sysfs`. The kernel is in the cell because "not built for the
+running kernel" means nothing without it, months later. The warnings themselves
+print during the log and stay in the row; `release:check` refuses a row that is
+blank there, since a release whose host was never looked at is not the whole
+story of what shipped.
 
 ### Worksheet
 
@@ -345,10 +378,10 @@ npm run check:fast # the same minus tests/slow (the install cycle): what PRs run
 npm run release    # build, then the deploy gate — run this before publishing
 npm run gate       # the gate alone: refuses a missing, stale or untested build
 npm run smoke      # after deploying: the published site, its pages, Worker and export
-npm run release:log -- production  # the same smoke test, recorded in RELEASES.md
+npm run release:log -- production  # smoke it, sweep the host, record it in RELEASES.md
 npm run release:log -- production --dry-run  # smoke it and print the row, write nothing
 npm run release:log -- --status    # refresh the log's build-drift line only
-npm run release:check   # CI: newest logged build must be dist/ and name its Node
+npm run release:check   # CI: newest logged build must be dist/ and name its Node and host
 ```
 
 Node 24 is the supported runtime, and `.nvmrc` is the only place it is
@@ -540,6 +573,7 @@ scripts/check-size.ts      100 MB base-program budget
 src/lib/rack-markdown.ts   shared rack export (Worker + offline server)
 scripts/cosg.ts            read-only C / O / S / G checker
 scripts/doctrine.ts        the COS-G playbooks and extended framework index
+scripts/host-scan.ts       the machine behind the project: drivers, blacklists, DKMS
 scripts/red-queen.ts       install / start / status / uninstall, three modes + metal service
 install.sh                 one command: install from here, or clone and install
 scripts/build-offline.ts   assembles dist/server, then stamps the build
@@ -612,8 +646,8 @@ reports: a Worker replaced without its assets beside it would otherwise leave
 a footer naming a release the API denies. `npm run smoke -- https://…` checks another
 deployment; a 503 is reported as a hosting pause, not an app failure. What was
 deployed and how it answered is logged in [RELEASES.md](RELEASES.md) — build
-hash, release tag, environment, smoke result and the checks that run made, one row
-per deployment, written by
+hash, release tag, environment, smoke result, the checks that run made and what
+the host sweep reported, one row per deployment, written by
 `npm run release:log -- <environment>`. A status line above the table compares
 `dist/build.json` with the newest logged build, so a local build that was never
 deployed is called out in the log instead of being mistaken for the published

@@ -5,10 +5,14 @@
 //   S  syntax errors        TypeScript/JavaScript/JSON that will not parse
 //   G  ghosts               things parasitic to the host or the repository
 //
+// `--host` extends G from the tree to the machine: PCI hardware with no driver,
+// driver modules blocked from loading, and DKMS records with no source left.
+//
 //   npm run cosg -- ../my-project
 //   npm run cosg -- . --json
 //   npm run cosg -- . --report cosg-report.md
 //   npm run cosg -- . --strict
+//   npm run cosg -- . --host         and the machine: drivers, blacklists, DKMS
 //
 // The checker never executes, edits or deletes the code it scans. It only
 // reads files, and writes a report when you ask for one.
@@ -17,6 +21,7 @@ import { extname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
 import { extended, labels, playbooks, type Category } from './doctrine.ts'
+import { blacklistSummary, scanHost, type HostReport } from './host-scan.ts'
 
 type Severity = 'error' | 'warn' | 'info'
 
@@ -50,6 +55,7 @@ const args = process.argv.slice(2)
 const target = args.find((arg) => !arg.startsWith('--') && args[args.indexOf(arg) - 1] !== '--report') ?? '.'
 const asJson = args.includes('--json')
 const strict = args.includes('--strict')
+const hostFlag = args.includes('--host')
 const reportFlag = args.indexOf('--report')
 const reportPath = reportFlag >= 0 ? args[reportFlag + 1] : null
 const root = resolve(process.cwd(), target)
@@ -477,6 +483,23 @@ for (const entry of entries.filter((item) => item.isDir)) {
 }
 
 // ---------------------------------------------------------------------------
+// Host (opt-in)
+// ---------------------------------------------------------------------------
+
+// `--host` widens the ghost pass from the repository to the machine under it:
+// hardware with no driver, drivers blocked from loading, DKMS records that have
+// lost their source. Opt-in, because a project's findings are about the tree;
+// whichever machine happens to run the check is somebody's business only when
+// they ask. The sweep is read-only, so asking costs nothing.
+let host: HostReport | null = null
+if (hostFlag) {
+  host = scanHost()
+  for (const finding of host.findings) {
+    add('G', { rule: finding.rule, severity: finding.severity, message: finding.message, file: finding.file })
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
 
@@ -516,12 +539,32 @@ function markdown(): string {
     }
     lines.push('')
   }
+  if (host) {
+    lines.push('## Host — drivers, blacklists and DKMS', '')
+    if (!host.available) {
+      lines.push(`Skipped: ${host.reason}`, '')
+    } else {
+      const dark = host.devices.filter((device) => !device.driver).length
+      lines.push(`${host.devices.length} PCI devices on kernel ${host.kernel} · ${dark} with no driver`, '')
+      for (const device of host.devices) {
+        lines.push(`- \`${device.slot}\` ${device.kind} · ${device.driver ?? 'no driver'} · ${device.name}`)
+      }
+      lines.push('')
+      lines.push(`Blacklisted: ${blacklistSummary(host.blacklists)}.`)
+      lines.push('')
+      for (const record of host.dkms) {
+        const built = record.built.length === 0 ? 'built for no kernel' : `built for ${record.built.join(', ')}`
+        lines.push(`- DKMS ${record.name} ${record.version} — ${record.conf ? 'source present' : 'source missing'}; ${built}`)
+      }
+      lines.push('')
+    }
+  }
   lines.push('_Read-only scan: nothing was executed, edited or deleted._', '')
   return lines.join('\n')
 }
 
 if (asJson) {
-  console.log(JSON.stringify({ root, generatedAt: new Date().toISOString(), scanned, counts, total, playbooks, findings }, null, 2))
+  console.log(JSON.stringify({ root, generatedAt: new Date().toISOString(), scanned, counts, total, playbooks, host, findings }, null, 2))
 } else {
   console.log(`COS-G · ${root}`)
   console.log(`${scanned.files} files · ${scanned.dirs} directories${truncated ? ` (stopped at ${MAX_FILES})` : ''}`)
@@ -535,6 +578,24 @@ if (asJson) {
       console.log(`  ${finding.severity.padEnd(5)} ${where}${where ? ' — ' : ''}${finding.message}`)
     }
     if (list.length > 12) console.log(`  …and ${list.length - 12} more`)
+    console.log('')
+  }
+  if (host) {
+    console.log('Host — drivers, blacklists and DKMS')
+    if (!host.available) {
+      console.log(`  skipped: ${host.reason}`)
+    } else {
+      const dark = host.devices.filter((device) => !device.driver).length
+      console.log(`  ${host.devices.length} PCI devices on kernel ${host.kernel} · ${dark} with no driver`)
+      for (const device of host.devices) {
+        console.log(`  ${device.slot}  ${device.kind.padEnd(18)} ${(device.driver ?? '—').padEnd(18)} ${device.name}`)
+      }
+      console.log(`  blacklisted: ${blacklistSummary(host.blacklists)}`)
+      for (const record of host.dkms) {
+        const built = record.built.length === 0 ? 'built for no kernel' : `built for ${record.built.join(', ')}`
+        console.log(`  dkms ${record.name} ${record.version}: ${record.conf ? 'source present' : 'source missing'}; ${built}`)
+      }
+    }
     console.log('')
   }
   console.log(`Total: ${total} finding${total === 1 ? '' : 's'}. Read-only: nothing was executed, edited or deleted.`)

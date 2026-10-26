@@ -25,6 +25,14 @@
 // that some run was green. release:check compares that list with the suite, so
 // a row written by an older, shorter smoke is re-logged rather than trusted.
 //
+// The host sweep rides along in a Host column: what the machine that ran the
+// release reported about its own drivers, blacklists and DKMS records. The row
+// is the deployment's record, so the warnings are written down next to the
+// smoke result — a driver that will be missing after the next reboot is part of
+// what shipped, not a note kept somewhere else. release:check refuses a row
+// that does not say what the sweep found; `unavailable` is an answer, a blank
+// cell is not.
+//
 // A dry run does the same work — read the stamp, smoke the deployment, decide
 // where the row goes — and then stops: it prints the row it would have written
 // and leaves the log untouched, so a deployment can be checked before it is
@@ -39,6 +47,7 @@ import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { readStamp, type Stamp } from './build-stamp.ts'
+import { scanHost, summarizeHost, type HostFinding, type HostReport } from './host-scan.ts'
 import { resolveTag, TAG_UNKNOWN } from './release-tag.ts'
 import { checkNames, DEFAULT_BASE, smoke, type Check } from './smoke.ts'
 
@@ -63,17 +72,17 @@ export const STATUS = '> **Build status:**'
 /** A row logged before the runtime column existed, or by a stamp that lost it. */
 export const RUNTIME_UNKNOWN = '—'
 
-/** Deployed, Environment, Build, Tag, Node, Smoke, Checks: the shape written now. */
-const COLUMNS = 7
-export const HEADER_ROW = '| Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks |'
+/** Deployed, Environment, Build, Tag, Node, Smoke, Checks, Host: the shape written now. */
+const COLUMNS = 8
+export const HEADER_ROW = '| Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks | Host |'
 
 /**
  * A row keeps the shape it was written in; a missing column is filled in when
- * that deployment is logged again, never by rewriting history. Seven cells is
- * current, six predates the check list, five also predates the tag, four also
- * predates the Node.
+ * that deployment is logged again, never by rewriting history. Eight cells is
+ * current, seven predates the host column, six also predates the check list,
+ * five also predates the tag, four also predates the Node.
  */
-const SHAPES = [COLUMNS, COLUMNS - 1, COLUMNS - 2, COLUMNS - 3]
+const SHAPES = [COLUMNS, COLUMNS - 1, COLUMNS - 2, COLUMNS - 3, COLUMNS - 4]
 
 function isReleaseRow(parts: string[]): boolean {
   return SHAPES.includes(parts.length)
@@ -91,13 +100,18 @@ function tagCell(parts: string[]): string {
   return parts.length >= COLUMNS - 1 ? parts[3] : ''
 }
 
-/** The check list only exists in a row written now. */
+/** The check list exists from the column before the host, onwards. */
 function checksCell(parts: string[]): string[] {
-  if (parts.length !== COLUMNS) return []
+  if (parts.length < COLUMNS - 1) return []
   return parts[6]
     .split(',')
     .map((name) => name.trim())
     .filter((name) => name.length > 0)
+}
+
+/** The host summary only exists in a row written now. */
+function hostCell(parts: string[]): string {
+  return parts.length === COLUMNS ? parts[7] : ''
 }
 
 /** UTC, minute precision: "2026-10-24 21:18". */
@@ -117,7 +131,15 @@ function cells(line: string): string[] {
 }
 
 /** One Markdown table row, or a readable result when checks failed. */
-export function rowFor(input: { environment: Environment; stamp: Stamp; checks: Check[]; at?: string; tag?: string }): string {
+export function rowFor(input: {
+  environment: Environment
+  stamp: Stamp
+  checks: Check[]
+  /** What the host sweep reported; `unavailable…` when it could not run. */
+  host: string
+  at?: string
+  tag?: string
+}): string {
   const failed = input.checks.filter((check) => !check.ok)
   const total = input.checks.length
   const result = failed.length === 0 ? `${total}/${total}` : `${total - failed.length}/${total} — failed: ${failed.map((check) => check.name).join(', ')}`
@@ -131,7 +153,7 @@ export function rowFor(input: { environment: Environment; stamp: Stamp; checks: 
   // The tag describes the build, so a caller that knows it may pass it in; the
   // log command reads it from the stamp instead of trusting the operator's memory.
   const tag = input.tag ?? TAG_UNKNOWN
-  return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${tag} | ${node} | ${result} | ${made} |`
+  return `| ${input.at ?? utc(new Date().toISOString())} | ${input.environment} | ${build} | ${tag} | ${node} | ${result} | ${made} | ${input.host} |`
 }
 
 export interface Placed {
@@ -146,6 +168,14 @@ export function place(markdown: string, row: string, environment: string, short:
   const lines = markdown.split('\n')
   const separator = lines.findIndex((line) => /^\|\s*-{3,}/.test(line))
   if (separator === -1) throw new Error('RELEASES.md has no release table (no "| --- |" header row)')
+
+  // The header describes the shape rows are written in now; older rows keep
+  // their shorter shapes and the preamble says where they stop. Without this a
+  // new column lands under a header that does not have it — the log renders
+  // wrong and nothing in it is technically missing.
+  const rule = `| ${Array.from({ length: COLUMNS }, () => '---').join(' | ')} |`
+  if (lines[separator - 1]?.startsWith('| Deployed')) lines[separator - 1] = HEADER_ROW
+  lines[separator] = rule
 
   const existing = lines.findIndex((line, index) => {
     if (index <= separator) return false
@@ -187,6 +217,11 @@ export interface NewestBuild {
    * the column: nothing there says which checks happened.
    */
   checks: string[]
+  /**
+   * What the host sweep reported, as logged. Empty only for a row written
+   * before the column, which says nothing about the machine that released it.
+   */
+  host: string
 }
 
 /** The build in the first data row: the most recent deployment logged. */
@@ -203,7 +238,15 @@ export function newestBuild(markdown: string): NewestBuild | null {
     if (!match) continue
     const tag = tagCell(parts)
     const node = nodeCell(parts)
-    return { short: match[1], environment: parts[1], at: parts[0], tag, node: node === RUNTIME_UNKNOWN ? '' : node, checks: checksCell(parts) }
+    return {
+      short: match[1],
+      environment: parts[1],
+      at: parts[0],
+      tag,
+      node: node === RUNTIME_UNKNOWN ? '' : node,
+      checks: checksCell(parts),
+      host: hostCell(parts),
+    }
   }
   return null
 }
@@ -298,6 +341,14 @@ export function verifyLog(root: string = ROOT, file?: string): VerifyResult {
       `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) does not record the release tag — re-log the deployment to fill the column.`,
     )
   }
+  // The row has to carry what the host sweep reported. `unavailable — no sysfs`
+  // passes — a release from a machine without sysfs says so — but an empty cell
+  // means the row was written before the column or edited to drop it.
+  if (build && newest && newest.short === build && !newest.host) {
+    problems.push(
+      `the newest logged row for \`${build}\` (${newest.environment}, ${newest.at}) does not record what the host sweep reported — re-log the deployment to fill the column.`,
+    )
+  }
   // The row has to name the checks that ran, and they have to be this suite's.
   // A count alone would let a row claim a green run that never looked at the
   // footer; a list from an older suite would claim checks that no longer exist.
@@ -339,9 +390,10 @@ export interface RecordInput {
   dryRun?: boolean
 }
 
-/** Seams for the tests: a smoke runner and a project root of their own. */
+/** Seams for the tests: a smoke runner, a host sweep and a project root of their own. */
 export interface RecordOptions {
   run?: (url: string) => Promise<Check[]>
+  scan?: () => HostReport
   root?: string
 }
 
@@ -350,6 +402,9 @@ export interface RecordResult {
   url: string
   row: string
   checks: Check[]
+  /** The cell the row carries, and the warnings behind it. */
+  host: string
+  warnings: HostFinding[]
   logPath: string
   replaced: boolean
   /** False for a dry run: the row was prepared, not written. */
@@ -372,17 +427,30 @@ export async function record(input: RecordInput, options: RecordOptions = {}): P
   const url = input.url ?? URLS[input.environment]
   const logPath = resolve(input.file ?? join(root, 'RELEASES.md'))
   const checks = await (options.run ?? smoke)(url)
+  // The sweep reads files; it costs milliseconds and needs no privileges, so
+  // every logged release carries it rather than it being an optional extra.
+  const summary = summarizeHost((options.scan ?? scanHost)())
   // What the deployment says about itself is the truth to log: the stamp holds
   // the tag the build baked in. Only a stamp written before that was recorded
   // (empty tag) falls back to asking git at log time.
   const baked = stamp.tag || resolveTag(root)
-  const row = rowFor({ environment: input.environment, stamp, checks, at: input.at, tag: input.tag ?? baked })
+  const row = rowFor({ environment: input.environment, stamp, checks, host: summary.cell, at: input.at, tag: input.tag ?? baked })
   // Placement runs either way: whether a row would be added or would replace an
   // existing one is part of what a dry run reports.
   const placed = place(readFileSync(logPath, 'utf8'), row, input.environment, shortHash(stamp))
   if (!input.dryRun) writeFileSync(logPath, withStatus(placed.markdown, stamp))
 
-  return { environment: input.environment, url, row: placed.row, checks, logPath, replaced: placed.replaced, written: !input.dryRun }
+  return {
+    environment: input.environment,
+    url,
+    row: placed.row,
+    checks,
+    host: summary.cell,
+    warnings: summary.warnings,
+    logPath,
+    replaced: placed.replaced,
+    written: !input.dryRun,
+  }
 }
 
 function display(path: string): string {
@@ -411,6 +479,7 @@ if (invokedDirectly) {
     if (verdict.newest) console.log(`  runtime ${verdict.newest.node || 'not recorded'}`)
     if (verdict.newest) console.log(`  tag     ${verdict.newest.tag || 'not recorded'}`)
     if (verdict.newest) console.log(`  checks  ${verdict.newest.checks.length ? `${verdict.newest.checks.length} recorded` : 'not recorded'}`)
+    if (verdict.newest) console.log(`  host    ${verdict.newest.host || 'not recorded'}`)
     console.log('')
     if (verdict.ok) {
       console.log(`  ok      ${verdict.status.replace(`${STATUS} `, '')}`)
@@ -444,6 +513,10 @@ if (invokedDirectly) {
       console.log(dryRun ? 'Red Queen release log (dry run)' : 'Red Queen release log')
       console.log(`  target  ${result.url}`)
       console.log(`  result  ${passed}/${result.checks.length} checks passed in ${((performance.now() - started) / 1000).toFixed(1)} s`)
+      console.log(`  host    ${result.host}`)
+      // The cell says how many; this says which, so the warning is readable at
+      // the moment it is written down rather than only from RELEASES.md.
+      for (const warning of result.warnings) console.log(`          warn  ${warning.message}`)
       const where = display(result.logPath)
       if (result.written) {
         console.log(`  logged  ${where} (${result.replaced ? 'updated the existing row' : 'new row at the top'})`)

@@ -22,6 +22,7 @@ import {
   verifyLog,
   withStatus,
 } from '../scripts/release-log.ts'
+import type { HostFinding, HostReport } from '../scripts/host-scan.ts'
 import { checkNames, type Check } from '../scripts/smoke.ts'
 
 // The release log is the only durable record of what was published, so the row
@@ -50,7 +51,25 @@ const SUITE = checkNames()
 const MADE = SUITE.join(', ')
 const suiteChecks = (): Check[] => SUITE.map((name) => ({ name, ok: true, detail: '' }))
 
-const SEPARATOR = '| --- | --- | --- | --- | --- | --- | --- |'
+// What the sweep says on a quiet machine, as the cell and as the report it is
+// summarised from. Two devices is enough to prove the count is carried over.
+const HOST = 'clean — 2 devices on 7.2.6-76070206-generic'
+const host = (findings: HostFinding[] = [], available = true): HostReport => ({
+  available,
+  reason: available ? '' : '/sys/bus/pci/devices is not readable — the host sweep needs Linux sysfs.',
+  kernel: '7.2.6-76070206-generic',
+  devices: available
+    ? [
+        { slot: '0000:00:02.0', kind: 'display', name: 'UHD Graphics', driver: 'i915', modalias: '' },
+        { slot: '0000:00:1f.0', kind: 'bridge', name: 'ISA bridge', driver: null, modalias: '' },
+      ]
+    : [],
+  blacklists: [],
+  dkms: [],
+  findings,
+})
+
+const SEPARATOR = '| --- | --- | --- | --- | --- | --- | --- | --- |'
 
 const HEADER = [
   '# Releases',
@@ -66,36 +85,49 @@ test('the short hash is the twelve characters after the algorithm', () => {
   assert.equal(shortHash(stamp({ hash: 'sha256:abcdef0123456789' })), 'abcdef012345')
 })
 
-test('a passing run logs time, environment, build, tag, runtime, result and checks', () => {
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18', tag: 'v1.0.0' })
-  assert.equal(row, `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export |`)
+test('a passing run logs time, environment, build, tag, runtime, result, checks and host', () => {
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), host: HOST, at: '2026-10-24 21:18', tag: 'v1.0.0' })
+  assert.equal(
+    row,
+    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export | ${HOST} |`,
+  )
+  assert.ok(row.endsWith(`| ${HOST} |`), 'the host sweep is the last cell, so it can be appended without moving the rest')
 })
 
 test('a build no tag describes logs a dash rather than a guessed version', () => {
-  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18' })
-  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${TAG_UNKNOWN} | ${process.version} | 4/4 | shell, deployment, health, export |`)
+  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(), host: HOST, at: '2026-10-24 21:18' })
+  assert.equal(
+    row,
+    `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | ${TAG_UNKNOWN} | ${process.version} | 4/4 | shell, deployment, health, export | ${HOST} |`,
+  )
 })
 
 test('a stamp without a runtime logs a dash rather than the node running the tool', () => {
-  const row = rowFor({ environment: 'preview', stamp: stamp({ node: '' }), checks: checks(), at: '2026-10-24 21:18', tag: 'v1.0.0' })
-  assert.equal(row, `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${RUNTIME_UNKNOWN} | 4/4 | shell, deployment, health, export |`)
+  const row = rowFor({ environment: 'preview', stamp: stamp({ node: '' }), checks: checks(), host: HOST, at: '2026-10-24 21:18', tag: 'v1.0.0' })
+  assert.equal(
+    row,
+    `| 2026-10-24 21:18 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${RUNTIME_UNKNOWN} | 4/4 | shell, deployment, health, export | ${HOST} |`,
+  )
   assert.ok(!row.includes(process.version), 'the Node that ran release:log is not the build runtime')
 })
 
 test('a failing run names the checks that failed and still records them all', () => {
-  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(['health', 'deployment']), at: '2026-10-24 22:05', tag: 'v1.0.0' })
-  assert.equal(row, `| 2026-10-24 22:05 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 2/4 — failed: deployment, health | shell, deployment, health, export |`)
+  const row = rowFor({ environment: 'preview', stamp: stamp(), checks: checks(['health', 'deployment']), host: HOST, at: '2026-10-24 22:05', tag: 'v1.0.0' })
+  assert.equal(
+    row,
+    `| 2026-10-24 22:05 | preview | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 2/4 — failed: deployment, health | shell, deployment, health, export | ${HOST} |`,
+  )
 })
 
 test('a real run is recorded with every check it made, including the footer', () => {
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: SUITE.map((name) => ({ name, ok: true, detail: '' })), at: '2026-10-24 21:18', tag: 'v1.0.0' })
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: suiteChecks(), host: HOST, at: '2026-10-24 21:18', tag: 'v1.0.0' })
   assert.ok(row.includes(`| ${SUITE.length}/${SUITE.length} | ${MADE} |`), 'the result and the check list travel together')
   assert.ok(row.includes('footer'), 'the footer check is named in the row')
   assert.ok(row.includes('health'), 'the health check is named in the row')
 })
 
 test('a new deployment goes directly under the header', () => {
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 21:18' })
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), host: HOST, at: '2026-10-24 21:18' })
   const result = place(HEADER, row, 'production', '429051402764')
   assert.equal(result.replaced, false)
   assert.deepEqual(result.markdown.split('\n').slice(0, 7), [
@@ -116,14 +148,14 @@ test('re-checking a logged build updates its row and keeps the deployment time',
     '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 13/14 — failed: health |',
     '',
   ].join('\n')
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-24 22:40', tag: 'v1.0.0' })
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), host: HOST, at: '2026-10-24 22:40', tag: 'v1.0.0' })
   const result = place(logged, row, 'production', '429051402764')
   assert.equal(result.replaced, true)
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 1)
   const dataRow = result.markdown.split('\n').find((line) => line.startsWith('| 2026'))
   assert.equal(
     dataRow,
-    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export |`,
+    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export | ${HOST} |`,
   )
 })
 
@@ -134,22 +166,44 @@ test('a row logged before the Node column is still found and gains one', () => {
     '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | 14/14 |',
     '',
   ].join('\n')
-  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), at: '2026-10-25 09:00', tag: 'v1.0.0' })
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), host: HOST, at: '2026-10-25 09:00', tag: 'v1.0.0' })
   const result = place(legacy, row, 'production', '429051402764')
   assert.equal(result.replaced, true, 'an older row is still the same deployment')
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 1)
   const dataRow = result.markdown.split('\n').find((line) => line.startsWith('| 2026'))
   assert.equal(
     dataRow,
-    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export |`,
+    `| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | ${process.version} | 4/4 | shell, deployment, health, export | ${HOST} |`,
     'the row is rewritten in the current shape',
   )
-  assert.equal(dataRow?.split('|').length, 9, 'seven cells: time, environment, build, tag, node, smoke, checks')
+  assert.equal(dataRow?.split('|').length, 10, 'eight cells: time, environment, build, tag, node, smoke, checks, host')
+})
+
+test('logging into a legacy table repairs its header rather than leaving a short one', () => {
+  const legacy = [
+    '| Deployed (UTC) | Environment | Build | Smoke |',
+    '| --- | --- | --- | --- |',
+    '| 2026-10-24 21:18 | production | `429051402764` — 1.0.0, built 21:13 | 14/14 |',
+    '| 2026-10-24 20:31 | preview | `6d49ada3b198` — 1.0.0, built 20:30 | 14/14 |',
+    '',
+  ].join('\n')
+  const row = rowFor({ environment: 'production', stamp: stamp(), checks: checks(), host: HOST, at: '2026-10-25 09:00', tag: 'v1.0.0' })
+  const placed = place(legacy, row, 'production', '429051402764')
+  const lines = placed.markdown.split('\n')
+
+  assert.equal(lines[0], HEADER_ROW, 'the header gains the columns rows are written with now')
+  assert.equal(lines[1], SEPARATOR, 'and the rule under it matches its width')
+  assert.equal(lines[2], placed.row, 'the re-logged row, in the current shape')
+  assert.equal(
+    lines[3],
+    '| 2026-10-24 20:31 | preview | `6d49ada3b198` — 1.0.0, built 20:30 | 14/14 |',
+    'history keeps the shape it was written in',
+  )
 })
 
 test('the same environment on a different build is a second deployment', () => {
   const logged = `${HEADER_ROW}\n${SEPARATOR}\n| 2026-10-24 21:18 | production | \`429051402764\` — 1.0.0, built 21:13 | v1.0.0 | v24.17.0 | 14/14 |\n`
-  const newer = rowFor({ environment: 'production', stamp: stamp({ hash: 'sha256:ffffffffffff0000' }), checks: checks(), at: '2026-10-25 09:00' })
+  const newer = rowFor({ environment: 'production', stamp: stamp({ hash: 'sha256:ffffffffffff0000' }), checks: checks(), host: HOST, at: '2026-10-25 09:00' })
   const result = place(logged, newer, 'production', 'ffffffffffff')
   assert.equal(result.replaced, false)
   assert.equal(result.markdown.split('\n').filter((line) => line.startsWith('| 2026')).length, 2)
@@ -160,7 +214,7 @@ test('a log without the release table is refused instead of corrupted', () => {
   assert.throws(() => place('# Releases\n\nNothing here yet.\n', '| row |', 'production', 'abc'), /no release table/)
 })
 
-const LOGGED_ROW = `| 2026-10-24 21:29 | production | \`935e02c6b357\` — 1.0.0, built 21:28 | v1.0.0 | v24.17.0 | ${SUITE.length}/${SUITE.length} | ${MADE} |`
+const LOGGED_ROW = `| 2026-10-24 21:29 | production | \`935e02c6b357\` — 1.0.0, built 21:28 | v1.0.0 | v24.17.0 | ${SUITE.length}/${SUITE.length} | ${MADE} | ${HOST} |`
 
 const LOGGED = [
   '# Releases',
@@ -182,6 +236,7 @@ test('the newest logged build is the first row with a build hash', () => {
     tag: 'v1.0.0',
     node: 'v24.17.0',
     checks: SUITE,
+    host: HOST,
   })
   assert.equal(newestBuild(HEADER), null, 'a row naming only a served shell is not a build')
   assert.equal(newestBuild('no table'), null)
@@ -194,7 +249,7 @@ test('a row logged before the Node column reports no runtime', () => {
     '| 2026-10-24 21:29 | production | `935e02c6b357` — 1.0.0, built 21:28 | 14/14 |',
     '',
   ].join('\n')
-  assert.deepEqual(newestBuild(legacy), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: '', node: '', checks: [] })
+  assert.deepEqual(newestBuild(legacy), { short: '935e02c6b357', environment: 'production', at: '2026-10-24 21:29', tag: '', node: '', checks: [], host: '' })
 })
 
 test('a current build is reported as matching the newest logged build', () => {
@@ -387,10 +442,32 @@ test('a current row written before the check column fails until it is re-logged'
     assert.match(verdict.problems.join('\n'), /does not record which smoke checks ran — re-log the deployment to name them/)
 
     // Re-logging the same deployment adds the list and keeps its time.
-    const rewritten = place(before, rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), at: '2026-10-25 09:00' }), 'production', '935e02c6b357').markdown
+    const rewritten = place(before, rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), host: HOST, at: '2026-10-25 09:00' }), 'production', '935e02c6b357').markdown
     writeFileSync(join(root, 'RELEASES.md'), withStatus(rewritten, current()))
     assert.deepEqual(verifyLog(root).problems, [])
     assert.match(readFileSync(join(root, 'RELEASES.md'), 'utf8'), /\| 2026-10-24 21:29 \| production \|.*footer, export, export empty \|/, 'the re-logged row names the suite')
+  } finally {
+    cleanup()
+  }
+})
+
+test('a current row from before the host column fails until it is re-logged', () => {
+  const { root, cleanup } = project()
+  try {
+    writeStampFile(root, current())
+    // Seven cells: the shape written before the row had to say what the host
+    // sweep found. Its checks cell is in the same place, so the only gap is Host.
+    const before = LOGGED.replace(LOGGED_ROW, LOGGED_ROW.replace(`| ${HOST} |`, '|'))
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(before, current()))
+    const verdict = verifyLog(root)
+    assert.equal(verdict.ok, false)
+    assert.match(verdict.problems.join('\n'), /does not record what the host sweep reported — re-log the deployment to fill the column/)
+
+    // Re-logging fills the column and keeps the deployment time.
+    const rewritten = place(before, rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), host: HOST, at: '2026-10-25 09:00' }), 'production', '935e02c6b357').markdown
+    writeFileSync(join(root, 'RELEASES.md'), withStatus(rewritten, current()))
+    assert.deepEqual(verifyLog(root).problems, [])
+    assert.match(readFileSync(join(root, 'RELEASES.md'), 'utf8'), /\| 2026-10-24 21:29 \| production \|.*\| clean — 2 devices on 7\.2\.6-76070206-generic \|/)
   } finally {
     cleanup()
   }
@@ -412,7 +489,7 @@ test('a legacy row for the current build fails until it is re-logged', () => {
     assert.match(verifyLog(root).problems.join('\n'), /does not record the Node that built it/)
 
     // Re-logging rewrites that row in the current shape, and the check passes.
-    const row = rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), at: '2026-10-25 09:00' })
+    const row = rowFor({ environment: 'production', stamp: current(), checks: suiteChecks(), host: HOST, at: '2026-10-25 09:00' })
     const rewritten = place(legacy, row, 'production', '935e02c6b357').markdown
     writeFileSync(join(root, 'RELEASES.md'), withStatus(rewritten, current()))
     assert.deepEqual(verifyLog(root).problems, [])
@@ -433,7 +510,7 @@ test('a dry run prepares the row and leaves the log alone', async () => {
   const { root, logPath, cleanup } = recordable()
   try {
     const before = readFileSync(logPath, 'utf8')
-    const result = await record({ environment: 'preview', at: '2026-10-25 09:00', dryRun: true }, { root, run: async () => suiteChecks() })
+    const result = await record({ environment: 'preview', at: '2026-10-25 09:00', dryRun: true }, { root, run: async () => suiteChecks(), scan: () => host() })
 
     assert.equal(result.written, false, 'a dry run says it wrote nothing')
     assert.equal(result.replaced, false, 'this build is not in the log yet, so the row would be added')
@@ -450,7 +527,7 @@ test('a dry run of an already logged build says it would update that row', async
   try {
     writeFileSync(logPath, LOGGED)
     const before = readFileSync(logPath, 'utf8')
-    const result = await record({ environment: 'production', dryRun: true }, { root, run: async () => suiteChecks() })
+    const result = await record({ environment: 'production', dryRun: true }, { root, run: async () => suiteChecks(), scan: () => host() })
 
     assert.equal(result.written, false)
     assert.equal(result.replaced, true, 'the deployment is already logged; the row would be updated in place')
@@ -466,7 +543,7 @@ test('a dry run writes nothing even when the smoke test failed', async () => {
   try {
     const before = readFileSync(logPath, 'utf8')
     const failing = suiteChecks().map((check) => (check.name === 'footer' ? { ...check, ok: false, detail: 'stale bundle' } : check))
-    const result = await record({ environment: 'preview', at: '2026-10-25 09:00', dryRun: true }, { root, run: async () => failing })
+    const result = await record({ environment: 'preview', at: '2026-10-25 09:00', dryRun: true }, { root, run: async () => failing, scan: () => host() })
 
     assert.equal(result.written, false)
     assert.match(result.row, new RegExp(`\\| ${SUITE.length - 1}/${SUITE.length} — failed: footer \\|`))
@@ -479,13 +556,53 @@ test('a dry run writes nothing even when the smoke test failed', async () => {
 test('recording for real writes the row and the status line', async () => {
   const { root, logPath, cleanup } = recordable()
   try {
-    const result = await record({ environment: 'preview', at: '2026-10-25 09:00' }, { root, run: async () => suiteChecks() })
+    const result = await record({ environment: 'preview', at: '2026-10-25 09:00' }, { root, run: async () => suiteChecks(), scan: () => host() })
 
     assert.equal(result.written, true)
     const written = readFileSync(logPath, 'utf8')
     assert.ok(written.includes(result.row), 'the row it reported is the row on disk')
     assert.match(written, /\*\*Build status:\*\*/)
     assert.match(written, /footer/, 'the recorded row proves the footer was checked')
+    assert.ok(written.includes(`| ${HOST} |`), 'and that the machine was swept')
+  } finally {
+    cleanup()
+  }
+})
+
+test('the host warnings a release was made with are written into its row', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    const findings: HostFinding[] = [
+      { rule: 'unbound-hardware', severity: 'warn', message: '0000:6f:00.0 RTL8125 2.5GbE Controller (network) has no driver bound and no module in /lib/modules/7.2.6 claims it.' },
+      { rule: 'dkms-not-built', severity: 'warn', message: 'DKMS module system76 is built for 7.0.11 but not for 7.2.6 — after a reboot into 7.2.6 it will not be there.' },
+      // Info is context, not a fault: it must not turn into a warning in the row.
+      { rule: 'blacklisted-driver', severity: 'info', message: 'r8169 is blacklisted in r8125.conf, but 0000:6f:00.0 is served by r8125.' },
+    ]
+    const result = await record(
+      { environment: 'preview', at: '2026-10-25 09:00', dryRun: true },
+      { root, run: async () => suiteChecks(), scan: () => host(findings) },
+    )
+
+    assert.equal(result.host, '2 warnings — unbound-hardware, dkms-not-built on 7.2.6-76070206-generic')
+    assert.equal(result.warnings.length, 2, 'the info finding is not counted as a warning')
+    assert.ok(result.row.endsWith(`| ${result.host} |`), 'the row says what the machine reported')
+    assert.match(readFileSync(logPath, 'utf8'), /\| Checks \| Host \|/, 'the log it would go into has the column')
+  } finally {
+    cleanup()
+  }
+})
+
+test('a release from a machine without sysfs says so instead of claiming a clean sweep', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    const result = await record(
+      { environment: 'preview', at: '2026-10-25 09:00' },
+      { root, run: async () => suiteChecks(), scan: () => host([], false) },
+    )
+
+    assert.equal(result.host, 'unavailable — no sysfs')
+    assert.deepEqual(result.warnings, [])
+    assert.ok(readFileSync(logPath, 'utf8').includes('| unavailable — no sysfs |'))
   } finally {
     cleanup()
   }

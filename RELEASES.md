@@ -22,7 +22,12 @@ byte-for-byte comparison of the served shell with `dist/client/index.html`.
 **Checks** names every check that run made, in order — so a row is evidence that
 the footer and health checks happened, not just that a count came back green.
 Rows logged before the column existed stop at **Smoke**: their runs made fewer
-checks and nothing here can say which. Environment URLs are in
+checks and nothing here can say which. **Host** is what the host sweep reported
+on the machine that made the release — `clean — 23 devices on 7.2.6`,
+`2 warnings — unbound-hardware, dkms-not-built on 7.2.6`, or
+`unavailable — no sysfs` when it could not look. The kernel belongs in the cell:
+a driver missing from the running kernel says nothing without naming it. Rows
+written before the column stop at **Checks**. Environment URLs are in
 [README.md](README.md#version-102-hosted).
 
 The **Build status** line above the table is the drift flag: it compares
@@ -36,18 +41,19 @@ logged. `npm run release` refreshes it, so a rebuild shows up immediately as
 when the newest logged build is not `dist/build.json`, when that row does not
 record the Node that built it — a dash where a version belongs — when that row
 has no tag column at all, when that row does not name the smoke checks it made
-or names a set the suite no longer makes, or when the status line is missing or
-stale. A freshly written mismatch line is still a failure: an honest warning is
-not a deployment. The Node, tag and check rules bind only to the row for the
+or names a set the suite no longer makes, when that row is blank where the host
+sweep belongs (`unavailable — no sysfs` is an answer; nothing is not), or when
+the status line is missing or stale. A freshly written mismatch line is still a
+failure: an honest warning is not a deployment. The Node, tag and check rules bind only to the row for the
 current build, and a dashed tag on that row passes: a build can ship before any
 tag names it. The dashes and short rows on older rows are history, not drift.
 
 > **Build status:** `dist/build.json` is `ae12da6ac2db`, which matches the newest logged build.
 
-| Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks |
-| --- | --- | --- | --- | --- | --- | --- |
-| 2026-10-26 02:51 | production | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty |
-| 2026-10-26 02:51 | preview | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty |
+| Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks | Host |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-26 02:51 | production | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty | 4 warnings — blacklisted-driver, stale-dkms, dkms-not-built on 7.2.6-76070206-generic |
+| 2026-10-26 02:51 | preview | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty | 4 warnings — blacklisted-driver, stale-dkms, dkms-not-built on 7.2.6-76070206-generic |
 | 2026-10-26 01:23 | production | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |
 | 2026-10-26 01:23 | preview | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |
 | 2026-10-25 23:30 | preview | `5c17c5487276` — 1.0.0, built 23:27 | v1.0.0-4-g7bfd380 | v24.17.0 | 14/14 |
@@ -90,11 +96,12 @@ npm run release:log -- --status                         # refresh the drift flag
 npm run release:check                                   # CI: log and build must agree
 ```
 
-The command runs the same smoke test against the environment, reads the build
-hash and runtime from `dist/build.json` — so the row names the build the gate
-approved and the Node it was built on — and puts the row at the top of the
-table. Re-logging an older row is how a dash is replaced with a version, since
-the stamp of a build made now still records its runtime. A build that is already logged for
+The command runs the same smoke test against the environment, sweeps the host it
+runs on, reads the build hash and runtime from `dist/build.json` — so the row
+names the build the gate approved and the Node it was built on — and puts the
+row at the top of the table, with any host warnings printed above it.
+Re-logging an older row is how a dash is replaced with a version, since the
+stamp of a build made now still records its runtime. A build that is already logged for
 that environment is updated in place and keeps its deployment time: a re-check
 is not a new deployment. A failure is written down too, with the checks that
 failed, and the command exits non-zero so a bad release is not mistaken for a
