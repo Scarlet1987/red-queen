@@ -4,6 +4,7 @@
 //   npm run release:log -- production
 //   npm run release:log -- preview
 //   npm run release:log -- preview --url https://… --at "2026-10-24 21:18"
+//   npm run release:log -- preview --dry-run   smoke it and show the row only
 //   npm run release:log -- --status     refresh the build status line only
 //   npm run release:log -- --verify     fail when the log and the build disagree
 //
@@ -23,6 +24,11 @@
 // release is evidence that the footer and health checks happened — not merely
 // that some run was green. release:check compares that list with the suite, so
 // a row written by an older, shorter smoke is re-logged rather than trusted.
+//
+// A dry run does the same work — read the stamp, smoke the deployment, decide
+// where the row goes — and then stops: it prints the row it would have written
+// and leaves the log untouched, so a deployment can be checked before it is
+// recorded.
 //
 // A status line above the table says whether dist/build.json still matches the
 // newest logged build. The gate refreshes it as part of npm run release, so a
@@ -329,6 +335,14 @@ export interface RecordInput {
   file?: string
   /** Resolved from git when omitted; a test can name one instead. */
   tag?: string
+  /** Smoke and build the row, then stop before writing it. */
+  dryRun?: boolean
+}
+
+/** Seams for the tests: a smoke runner and a project root of their own. */
+export interface RecordOptions {
+  run?: (url: string) => Promise<Check[]>
+  root?: string
 }
 
 export interface RecordResult {
@@ -338,31 +352,37 @@ export interface RecordResult {
   checks: Check[]
   logPath: string
   replaced: boolean
+  /** False for a dry run: the row was prepared, not written. */
+  written: boolean
 }
 
 /**
  * Smoke the deployment, then log it. The row is written even when the smoke
  * test fails — a failed release belongs in the record — and the caller decides
- * the exit code from `checks`.
+ * the exit code from `checks`. A dry run prepares the same row and writes
+ * nothing, so the log never records a check that was not made.
  */
-export async function record(input: RecordInput): Promise<RecordResult> {
+export async function record(input: RecordInput, options: RecordOptions = {}): Promise<RecordResult> {
   if (!ENVIRONMENTS.includes(input.environment)) throw new Error(`Unknown environment "${input.environment}". Use preview or production.`)
 
-  const stamp = readStamp(ROOT)
+  const root = options.root ?? ROOT
+  const stamp = readStamp(root)
   if (!stamp) throw new Error('No build in dist/ (no build.json). Run npm run release first.')
 
   const url = input.url ?? URLS[input.environment]
-  const logPath = resolve(input.file ?? LOG_PATH)
-  const checks = await smoke(url)
+  const logPath = resolve(input.file ?? join(root, 'RELEASES.md'))
+  const checks = await (options.run ?? smoke)(url)
   // What the deployment says about itself is the truth to log: the stamp holds
   // the tag the build baked in. Only a stamp written before that was recorded
   // (empty tag) falls back to asking git at log time.
-  const baked = stamp.tag || resolveTag(ROOT)
+  const baked = stamp.tag || resolveTag(root)
   const row = rowFor({ environment: input.environment, stamp, checks, at: input.at, tag: input.tag ?? baked })
+  // Placement runs either way: whether a row would be added or would replace an
+  // existing one is part of what a dry run reports.
   const placed = place(readFileSync(logPath, 'utf8'), row, input.environment, shortHash(stamp))
-  writeFileSync(logPath, withStatus(placed.markdown, stamp))
+  if (!input.dryRun) writeFileSync(logPath, withStatus(placed.markdown, stamp))
 
-  return { environment: input.environment, url, row: placed.row, checks, logPath, replaced: placed.replaced }
+  return { environment: input.environment, url, row: placed.row, checks, logPath, replaced: placed.replaced, written: !input.dryRun }
 }
 
 function display(path: string): string {
@@ -411,21 +431,31 @@ if (invokedDirectly) {
       process.exitCode = 0
     }
   } else if (!environment || !ENVIRONMENTS.includes(environment)) {
-    console.error(`Usage: npm run release:log -- ${ENVIRONMENTS.join('|')} [--url URL] [--at "YYYY-MM-DD HH:MM"] [--file PATH]`)
+    console.error(`Usage: npm run release:log -- ${ENVIRONMENTS.join('|')} [--url URL] [--at "YYYY-MM-DD HH:MM"] [--file PATH] [--dry-run]`)
     console.error('       npm run release:log -- --status [--file PATH]')
     process.exitCode = 2
   } else {
     const started = performance.now()
     try {
-      const result = await record({ environment, url: flag('url'), at: flag('at'), file: flag('file') })
+      const dryRun = args.includes('--dry-run')
+      const result = await record({ environment, url: flag('url'), at: flag('at'), file: flag('file'), dryRun })
       const passed = result.checks.filter((check) => check.ok).length
       const failed = result.checks.filter((check) => !check.ok)
-      console.log('Red Queen release log')
+      console.log(dryRun ? 'Red Queen release log (dry run)' : 'Red Queen release log')
       console.log(`  target  ${result.url}`)
       console.log(`  result  ${passed}/${result.checks.length} checks passed in ${((performance.now() - started) / 1000).toFixed(1)} s`)
-      console.log(`  logged  ${display(result.logPath)} (${result.replaced ? 'updated the existing row' : 'new row at the top'})`)
+      const where = display(result.logPath)
+      if (result.written) {
+        console.log(`  logged  ${where} (${result.replaced ? 'updated the existing row' : 'new row at the top'})`)
+      } else {
+        console.log(`  dry run ${where} (${result.replaced ? 'would update the existing row' : 'would add a new row at the top'})`)
+      }
       console.log('')
       console.log(`  ${result.row}`)
+      if (!result.written) {
+        console.log('')
+        console.log('  Nothing written: RELEASES.md is unchanged.')
+      }
       if (failed.length > 0) {
         console.log('')
         for (const check of failed) console.log(`  failed  ${check.name}  ${check.detail}`)

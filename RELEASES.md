@@ -83,6 +83,7 @@ whose shell hash is `dcb0090bd0d1` — the served page and
 
 ```sh
 npm run release:log -- production                      # smoke it, then log it
+npm run release:log -- preview --dry-run                # smoke it; show the row, write nothing
 npm run release:log -- preview --at "2026-10-24 21:18"  # name the deploy time
 npm run release:log -- production --url https://…       # another deployment
 npm run release:log -- --status                         # refresh the drift flag
@@ -98,7 +99,10 @@ that environment is updated in place and keeps its deployment time: a re-check
 is not a new deployment. A failure is written down too, with the checks that
 failed, and the command exits non-zero so a bad release is not mistaken for a
 good one. The timestamp is the moment the command ran; `--at` records the
-actual deploy time instead.
+actual deploy time instead. `--dry-run` does everything but the writing: it
+smokes the deployment, prints the row it would add or update, says whether the
+log would gain a row, and leaves `RELEASES.md` byte-identical — the way to see
+what a deployment looks like before it is on the record.
 
 The deploy itself is a Sites operation, not a CLI step, so the command records
 what it can observe: the URL that answered, the build in `dist/`, and the

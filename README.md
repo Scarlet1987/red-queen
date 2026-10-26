@@ -346,6 +346,7 @@ npm run release    # build, then the deploy gate — run this before publishing
 npm run gate       # the gate alone: refuses a missing, stale or untested build
 npm run smoke      # after deploying: the published site, its pages, Worker and export
 npm run release:log -- production  # the same smoke test, recorded in RELEASES.md
+npm run release:log -- production --dry-run  # smoke it and print the row, write nothing
 npm run release:log -- --status    # refresh the log's build-drift line only
 npm run release:check   # CI: newest logged build must be dist/ and name its Node
 ```

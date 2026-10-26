@@ -10,6 +10,7 @@ import {
   HEADER_ROW,
   newestBuild,
   place,
+  record,
   refreshStatusFile,
   resolveTag,
   RUNTIME_UNKNOWN,
@@ -415,6 +416,76 @@ test('a legacy row for the current build fails until it is re-logged', () => {
     const rewritten = place(legacy, row, 'production', '935e02c6b357').markdown
     writeFileSync(join(root, 'RELEASES.md'), withStatus(rewritten, current()))
     assert.deepEqual(verifyLog(root).problems, [])
+  } finally {
+    cleanup()
+  }
+})
+
+function recordable(): { root: string; logPath: string; cleanup: () => void } {
+  const root = mkdtempSync(join(tmpdir(), 'red-queen-record-'))
+  writeStampFile(root, current())
+  const logPath = join(root, 'RELEASES.md')
+  writeFileSync(logPath, HEADER)
+  return { root, logPath, cleanup: () => rmSync(root, { recursive: true, force: true }) }
+}
+
+test('a dry run prepares the row and leaves the log alone', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    const before = readFileSync(logPath, 'utf8')
+    const result = await record({ environment: 'preview', at: '2026-10-25 09:00', dryRun: true }, { root, run: async () => suiteChecks() })
+
+    assert.equal(result.written, false, 'a dry run says it wrote nothing')
+    assert.equal(result.replaced, false, 'this build is not in the log yet, so the row would be added')
+    assert.equal(readFileSync(logPath, 'utf8'), before, 'the log is byte-identical after a dry run')
+    assert.match(result.row, /^\| 2026-10-25 09:00 \| preview \| `935e02c6b357` — 1\.0\.0, built 21:13 \| v1\.0\.0 \|/)
+    assert.ok(result.row.includes(`| ${SUITE.length}/${SUITE.length} | ${MADE} |`), 'the row names every check, ready to be written')
+  } finally {
+    cleanup()
+  }
+})
+
+test('a dry run of an already logged build says it would update that row', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    writeFileSync(logPath, LOGGED)
+    const before = readFileSync(logPath, 'utf8')
+    const result = await record({ environment: 'production', dryRun: true }, { root, run: async () => suiteChecks() })
+
+    assert.equal(result.written, false)
+    assert.equal(result.replaced, true, 'the deployment is already logged; the row would be updated in place')
+    assert.match(result.row, /^\| 2026-10-24 21:29 \| production \|/, 'the deployment time is kept')
+    assert.equal(readFileSync(logPath, 'utf8'), before)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a dry run writes nothing even when the smoke test failed', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    const before = readFileSync(logPath, 'utf8')
+    const failing = suiteChecks().map((check) => (check.name === 'footer' ? { ...check, ok: false, detail: 'stale bundle' } : check))
+    const result = await record({ environment: 'preview', at: '2026-10-25 09:00', dryRun: true }, { root, run: async () => failing })
+
+    assert.equal(result.written, false)
+    assert.match(result.row, new RegExp(`\\| ${SUITE.length - 1}/${SUITE.length} — failed: footer \\|`))
+    assert.equal(readFileSync(logPath, 'utf8'), before, 'a failed dry run is not a release record')
+  } finally {
+    cleanup()
+  }
+})
+
+test('recording for real writes the row and the status line', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    const result = await record({ environment: 'preview', at: '2026-10-25 09:00' }, { root, run: async () => suiteChecks() })
+
+    assert.equal(result.written, true)
+    const written = readFileSync(logPath, 'utf8')
+    assert.ok(written.includes(result.row), 'the row it reported is the row on disk')
+    assert.match(written, /\*\*Build status:\*\*/)
+    assert.match(written, /footer/, 'the recorded row proves the footer was checked')
   } finally {
     cleanup()
   }
