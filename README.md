@@ -218,7 +218,7 @@ curl -fsSL … | sh -s -- --mode vm             # arguments go after `--`
 
 - The clone source is `--repo URL` (or `RED_QUEEN_REPO`), `--source DIR` says
   where to clone it, `--ref` which branch or tag. All have defaults: the URL
-  points at the repository this file is published from, and the ref is `v1.0.0`
+  points at the repository this file is published from, and the ref is `v1.0.1`
   — the tagged release — so an install today and one in a month are the same
   program. `--ref main` follows the branch instead.
 - It is idempotent: run it again and it finds the existing install and starts it

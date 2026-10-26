@@ -21,7 +21,7 @@
 #                             (default: ~/.red-queen-src)
 #   --repo URL                what to clone (default: RED_QUEEN_REPO or the
 #                             repository above)
-#   --ref REF                 branch or tag to clone (default: v1.0.0)
+#   --ref REF                 branch or tag to clone (default: v1.0.1)
 #   --no-service              install without the boot-time systemd unit
 #   --no-launch               do not start the app or open a browser
 #
@@ -29,7 +29,7 @@
 set -eu
 
 DEFAULT_REPO=https://github.com/Scarlet1987/red-queen.git
-DEFAULT_REF=v1.0.0
+DEFAULT_REF=v1.0.1
 
 mode=metal
 prefix=${RED_QUEEN_PREFIX:-"$HOME/.red-queen"}
