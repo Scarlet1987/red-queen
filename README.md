@@ -172,7 +172,7 @@ smoke`: seven checks that this copy works where it is running — local storage,
 the saved rack and refinements through their validators, the catalogue (38 tools,
 unique slugs, known categories and levels), covers loading as SVG, `POST
 /api/export` returning Markdown with a refinement note kept, `/api/health` — whose
-answer names the release (`red-queen · hosted · 1.0.0 · v1.0.0`) — and your model
+answer names the release (`red-queen · hosted · 1.0.1 · v1.0.1`) — and your model
 endpoint when one is configured. It reads only: the single write is a
 probe key it removes again, and no project folder is touched. Results stay on
 screen with timings, so a test launch can be reported by reading them out — 6 of
@@ -558,9 +558,11 @@ The look and feel started from the **Store** starter template (editorial
 layout, Instrument Serif display type, warm paper canvas) and was re-themed
 around a crimson accent and the three safety tones.
 
-## Version 1.0, hosted
+## Version 1.0.1, hosted
 
-Red Queen 1.0 is live and needs no install:
+Red Queen 1.0.1 is live and needs no install. It is the release that names
+itself: `/api/health` reports the version and tag the running bytes were built
+as, and both environments answer with the same pair.
 
 - **Production** — **https://site-7b563dd9b57543d58f4ee10986624b94.freebuff.page**
 - **Preview** — https://site-66228069b13847cc95a835f233ca293e.freebuff.page
@@ -568,8 +570,9 @@ Red Queen 1.0 is live and needs no install:
 Site `1710b6be-1a28-4f44-ba17-420cb5e348b8` on Freebuff Sites; both
 environments are published and serve the same build (shell SHA-256
 `28484d10…`), and both answer `/api/health` with the same release —
-`{"ok":true,"service":"red-queen","version":"1.0.0","tag":"v1.0.0-4-g7bfd380"}`
-as this build was logged.
+`{"ok":true,"service":"red-queen","version":"1.0.1","tag":"v1.0.1"}`
+as that build was logged. The installer pins the same tag, so a one-command
+install and the hosted site are the same program.
 
 That answer is the site's nameplate, and it is the cheapest way to ask a
 deployment what it is: `curl https://…/api/health` says which version and which
