@@ -123,6 +123,68 @@ test('hardware with no candidate module and no blacklist says so', () => {
   assert.match(finding.message, /no module in .*lib\/modules\/7\.2\.6 claims it/)
 })
 
+test('a loaded PCI driver driving nothing on this machine is a ghost', () => {
+  const root = fixture(
+    {
+      ...device('0000:0b:00.0', '030000', '1002', '67df', GPU_MODALIAS),
+      // nouveau claims a class of NVIDIA hardware; this machine has none of it.
+      'lib/modules/7.2.6/modules.alias': `${ALIASES}\nalias pci:v000010DEd00001C82sv*sd*bc*sc*i* nouveau`,
+      'proc/modules': 'nouveau 1234567 0 - Live 0x0\n',
+    },
+    { 'sys/0000:0b:00.0/driver': '../drivers/amdgpu' },
+  )
+
+  const report = scan(root)
+  assert.deepEqual(report.findings.map((finding) => finding.rule), ['idle-driver'])
+  assert.equal(report.findings[0].severity, 'warn')
+  assert.match(report.findings[0].message, /^nouveau is loaded but driving nothing here — its aliases match no device on this machine/)
+  assert.match(report.findings[0].message, /rmmod nouveau frees it/)
+})
+
+test('a loaded driver whose hardware another driver serves names what serves it', () => {
+  const root = fixture(
+    {
+      ...device('0000:6f:00.0', '020000', '10ec', '8125', NIC_MODALIAS),
+      'lib/modules/7.2.6/modules.alias': ALIASES,
+      'proc/modules': 'r8125 1234567 0 - Live 0x0\nr8169 987654 0 - Live 0x0\n',
+    },
+    { 'sys/0000:6f:00.0/driver': '../drivers/r8125' },
+  )
+
+  const report = scan(root)
+  assert.deepEqual(report.findings.map((finding) => finding.rule), ['idle-driver'])
+  assert.equal(report.findings[0].message.startsWith('r8169 is loaded'), true, 'the bound driver is not the ghost')
+  assert.match(report.findings[0].message, /the hardware it claims \(0000:6f:00\.0\) is served by r8125 instead/)
+})
+
+test('a driver bound under another name is not called idle, and neither is a module held open', () => {
+  const root = fixture(
+    {
+      ...device('0000:00:1f.4', '0c0500', '8086', 'a323', 'pci:v00008086d0000A323sv*sd*bc*sc*i*'),
+      'lib/modules/7.2.6/modules.alias': [
+        'alias pci:v00008086d0000A323sv*sd*bc*sc*i* i2c_i801',
+        // Claims Intel SPI hardware this machine does not have, but spi_intel
+        // depends on it, so it is not a leftover anyone could unload.
+        'alias pci:v00008086d0000A0A4sv*sd*bc*sc*i* spi_intel_pci',
+        // A USB alias: this sweep reads PCI only, so it is not its business.
+        'alias usb:v1D6Bp0002d*dc*dsc*dp*ic*isc*ip* usbhid',
+      ].join('\n'),
+      'proc/modules': 'i2c_i801 1 0 - Live 0x0\nspi_intel_pci 1 0 - Live 0x0\nspi_intel 1 0 spi_intel_pci, Live 0x0\nusbhid 1 0 - Live 0x0\n',
+    },
+    {
+      // The driver is a symlink into the driver tree, whose own `module` link
+      // names the module that provides it.
+      'sys/drivers/i801_smbus/module': '../module/i2c_i801',
+      'sys/0000:00:1f.4/driver': '../drivers/i801_smbus',
+    },
+  )
+
+  const report = scan(root)
+  assert.deepEqual(report.findings, [], 'no ghost: the module drives the SMBus under a different driver name')
+  assert.equal(report.devices[0].driver, 'i801_smbus')
+  assert.equal(report.devices[0].module, 'i2c_i801', 'sysfs says which module that driver belongs to')
+})
+
 test('a blacklisted module that is loaded anyway is a ghost, not a deliberate block', () => {
   // The block is written, the module is running, and it is running because the
   // driver that does own the NIC pulls it in — the block lost to a dependency.

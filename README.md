@@ -128,6 +128,17 @@ before the file was written all leave the module running — which is why the
 finding says whether to unload it or go and fix what loads it. A blocked module
 that is not loaded keeps the quieter note that the block is deliberate.
 
+A driver that is loaded and driving nothing is a ghost too: `idle-driver` says
+whether its aliases match no device on this machine at all (the hardware it was
+loaded for is absent or unplugged) or the hardware it claims is served by
+another driver, which is named. Only modules whose aliases claim PCI hardware
+are judged, because this sweep enumerates PCI alone — `modules.alias` also maps
+USB, platform and serio devices, and a USB driver would look idle for a reason
+that is not true. A module that is in use or that something depends on is left
+alone: it is not a leftover and could not be unloaded anyway. The driver on a
+device is resolved through `driver/module`, since a driver's name is often not
+its module's — `i2c_i801` is bound as `i801_smbus`.
+
 The text report counts blacklisted modules per file, because a stock distro
 blocks a hundred of them and the list would bury the finding that matters;
 `--json` carries the full device, blacklist, loaded-module and DKMS detail. Host findings are

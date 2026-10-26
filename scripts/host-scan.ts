@@ -8,6 +8,7 @@
 //   Which DKMS records have lost the source behind them, so `dkms status`
 //   errors instead of reporting — and which are not built for the kernel you
 //   are running, so their modules will not be there after a reboot?
+//   Which loaded drivers are serving nothing at all?
 //
 // Read-only, like the rest of the checker: it reads sysfs, /etc/modprobe.d,
 // /lib/modules, /var/lib/dkms and pci.ids. Nothing is loaded, unloaded,
@@ -16,7 +17,13 @@ import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from 'n
 import { release } from 'node:os'
 import { basename, join } from 'node:path'
 
-export type HostRule = 'unbound-hardware' | 'blacklisted-driver' | 'blacklist-ineffective' | 'stale-dkms' | 'dkms-not-built'
+export type HostRule =
+  | 'unbound-hardware'
+  | 'blacklisted-driver'
+  | 'blacklist-ineffective'
+  | 'idle-driver'
+  | 'stale-dkms'
+  | 'dkms-not-built'
 
 export interface HostFinding {
   rule: HostRule
@@ -36,6 +43,11 @@ export interface HostDevice {
   name: string
   /** The module bound to the device, or null when nothing is bound. */
   driver: string | null
+  /**
+   * The module behind that driver. A driver's name is often not its module's —
+   * i2c_i801 provides i801_smbus — and only sysfs knows which module it is.
+   */
+  module: string | null
   modalias: string
 }
 
@@ -155,6 +167,15 @@ function driverOf(dir: string): string | null {
   }
 }
 
+/** The module providing a device's driver, when the driver is a module at all. */
+function moduleOf(dir: string): string | null {
+  try {
+    return basename(readlinkSync(join(dir, 'driver', 'module')))
+  } catch {
+    return null
+  }
+}
+
 /** A built module, whether or not the distro compressed it. */
 const MODULE_FILE = /\.ko(\.(?:zst|xz|gz))?$/
 
@@ -198,6 +219,8 @@ function readIds(paths: string[]): Map<string, string> {
 interface Alias {
   module: string
   matcher: RegExp
+  /** Whether the pattern claims PCI hardware, as opposed to USB, platform, … */
+  pci: boolean
 }
 
 /**
@@ -217,7 +240,7 @@ function readAliases(path: string): Alias[] {
     for (const char of match[1]) {
       pattern += char === '*' ? '.*' : char === '?' ? '.' : char.replace(/[.+^${}()|[\]\\]/g, '\\$&')
     }
-    aliases.push({ module: match[2], matcher: new RegExp(`${pattern}$`) })
+    aliases.push({ module: match[2], matcher: new RegExp(`${pattern}$`), pci: match[1].startsWith('pci:') })
   }
   return aliases
 }
@@ -352,6 +375,25 @@ export function summarizeHost(report: HostReport): HostSummary {
 }
 
 /**
+ * A loaded PCI driver that is not driving anything on this machine: the
+ * hardware it was loaded for is absent, unplugged, or held by another driver.
+ * The two cases read differently because the remedy differs — a device that is
+ * being served means another driver won, and nothing matching means the
+ * hardware it wants is not here.
+ */
+function idleDriver(name: string, slots: string[], servers: string[]): HostFinding {
+  const state =
+    slots.length === 0
+      ? 'its aliases match no device on this machine, so whatever it was loaded for is absent or unplugged'
+      : `the hardware it claims (${list(slots)}) is served by ${list(servers)} instead`
+  return {
+    rule: 'idle-driver',
+    severity: 'warn',
+    message: `${name} is loaded but driving nothing here — ${state}, and nothing depends on it. rmmod ${name} frees it; check what loads it before blocking it in /etc/modprobe.d.`,
+  }
+}
+
+/**
  * A module a blacklist should have kept out, found in /proc/modules. The state
  * names what is holding it, because the remedy differs: a softdep or an
  * explicit modprobe has to be fixed at its source, while a module nothing needs
@@ -407,6 +449,7 @@ export function scanHost(options: HostOptions = {}): HostReport {
       kind: KINDS[klass.slice(2, 4).toLowerCase()] ?? `class ${klass || 'unknown'}`,
       name: deviceName ?? (vendorName ? `${vendorName} device ${device || 'unknown'}` : `${vendor || 'vendor'} ${device || 'device'}`.trim()),
       driver: driverOf(dir),
+      module: moduleOf(dir),
       modalias: read(join(dir, 'modalias')) ?? '',
     })
   }
@@ -495,6 +538,36 @@ export function scanHost(options: HostOptions = {}): HostReport {
     if (!running) continue
     explained.add(module)
     findings.push(loadedAnyway(module, running, blacklists))
+  }
+
+  // A driver that is loaded and driving nothing. Only modules whose aliases
+  // claim PCI hardware are judged: this sweep enumerates PCI alone, and
+  // modules.alias also maps USB, platform and serio devices, so calling a USB
+  // driver idle for not matching a PCI device would be a lie. A module that is
+  // in use or depended on is not a leftover and could not be unloaded anyway,
+  // so it is left alone.
+  const pciDrivers = new Set(aliases.filter((alias) => alias.pci).map((alias) => alias.module))
+  // The module a driver belongs to, not its name: i2c_i801 is bound as
+  // i801_smbus, and a tree that does not carry the link falls back to the name.
+  const serving = new Set<string>()
+  for (const device of devices) {
+    if (!device.driver) continue
+    serving.add(device.module ?? device.driver)
+  }
+  const claimed = new Map<string, string[]>()
+  for (const device of devices) {
+    for (const module of claims.get(device.slot) ?? []) {
+      const slots = claimed.get(module) ?? []
+      slots.push(device.slot)
+      claimed.set(module, slots)
+    }
+  }
+  for (const module of loaded) {
+    if (!pciDrivers.has(module.name) || serving.has(module.name)) continue
+    if (module.used > 0 || module.dependents.length > 0) continue
+    const slots = claimed.get(module.name) ?? []
+    const servers = [...new Set(slots.map((slot) => devices.find((device) => device.slot === slot)?.driver ?? 'nothing'))]
+    findings.push(idleDriver(module.name, slots, servers))
   }
 
   for (const record of dkms) {

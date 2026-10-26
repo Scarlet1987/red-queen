@@ -60,8 +60,8 @@ const host = (findings: HostFinding[] = [], available = true): HostReport => ({
   kernel: '7.2.6-76070206-generic',
   devices: available
     ? [
-        { slot: '0000:00:02.0', kind: 'display', name: 'UHD Graphics', driver: 'i915', modalias: '' },
-        { slot: '0000:00:1f.0', kind: 'bridge', name: 'ISA bridge', driver: null, modalias: '' },
+        { slot: '0000:00:02.0', kind: 'display', name: 'UHD Graphics', driver: 'i915', module: 'i915', modalias: '' },
+        { slot: '0000:00:1f.0', kind: 'bridge', name: 'ISA bridge', driver: null, module: null, modalias: '' },
       ]
     : [],
   blacklists: [],
