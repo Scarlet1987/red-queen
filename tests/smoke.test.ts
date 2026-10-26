@@ -26,10 +26,23 @@ interface Faults {
   echoUnknown?: boolean
   emptyRack?: number
   noBundle?: boolean
+  /** The shipped bundle's text, to make the footer name a different release. */
+  bundleBody?: string
 }
 
 /** What dist/build.json says a healthy build is, in these tests. */
 const RELEASE = { version: '1.0.0', tag: 'v1.0.0' }
+
+/**
+ * A bundle shaped like the minified one: the release from vite.config.ts baked
+ * in as literals, and the footer's label builder that prints them. The real
+ * output uses backticks, so this does too — the check has to survive whatever
+ * quote style the minifier picks.
+ */
+function bundle(release: { version: string; tag: string | null } = RELEASE): string {
+  const tag = release.tag === null ? 'null' : `\`${release.tag}\``
+  return `var v=\`${release.version}\`,t=${tag};function l(e=v,g=t){return e?g?\`\${e} · \${g}\`:\`\${e} · untagged build\`:\`Unstamped build\`}`
+}
 
 function shell(faults: Faults): string {
   const script = faults.noBundle ? '' : '<script type="module" src="/assets/index-test.js"></script>'
@@ -101,7 +114,7 @@ function handler(faults: Faults) {
 
     if (path === '/assets/index-test.js') {
       if (faults.noBundle) return send(404, 'not found', 'text/plain')
-      return send(faults.bundle ?? 200, 'console.log("red queen")', 'text/javascript; charset=utf-8')
+      return send(faults.bundle ?? 200, faults.bundleBody ?? bundle(), 'text/javascript; charset=utf-8')
     }
 
     if (path === '/assets/index-test.css') return send(200, 'body { margin: 0 }', 'text/css; charset=utf-8')
@@ -160,12 +173,13 @@ test('a healthy site passes every check', async () => {
   await withFixture({}, async (base, shellPath) => {
     const checks = await smoke(base, { shellPath, release: RELEASE })
     assert.deepEqual(failures(checks), [])
-    assert.equal(checks.length, 14)
+    assert.equal(checks.length, 15)
     assert.match(find(checks, 'shell').detail, /200 · html/)
     assert.match(find(checks, 'deployment').detail, /identical to .*index\.html · sha256 [0-9a-f]{12}/)
     assert.match(find(checks, 'bundle').detail, /index-test\.js 200/)
     assert.match(find(checks, 'styles').detail, /index-test\.css 200/)
     assert.match(find(checks, 'health').detail, /red-queen 1\.0\.0 · v1\.0\.0 — the release this build ships as/)
+    assert.match(find(checks, 'footer').detail, /bundle names 1\.0\.0 · v1\.0\.0 — the same release \/api\/health reports/)
     assert.match(find(checks, 'export').detail, /3 tools · refinement kept/)
     assert.match(find(checks, 'export empty').detail, /Your rack is empty/)
   })
@@ -249,10 +263,45 @@ test('a version that drifts while the tag matches is still caught', async () => 
 })
 
 test('an untagged build passes when the site agrees there is no tag', async () => {
-  await withFixture({ healthBody: { ok: true, service: 'red-queen', version: '1.0.0', tag: null } }, async (base, shellPath) => {
-    const checks = await smoke(base, { shellPath, release: { version: '1.0.0', tag: null } })
-    assert.deepEqual(failures(checks), [])
-    assert.match(find(checks, 'health').detail, /red-queen 1\.0\.0 · no tag/)
+  const untagged = bundle({ version: '1.0.0', tag: null })
+  await withFixture(
+    { healthBody: { ok: true, service: 'red-queen', version: '1.0.0', tag: null }, bundleBody: untagged },
+    async (base, shellPath) => {
+      const checks = await smoke(base, { shellPath, release: { version: '1.0.0', tag: null } })
+      assert.deepEqual(failures(checks), [])
+      assert.match(find(checks, 'health').detail, /red-queen 1\.0\.0 · no tag/)
+      assert.match(find(checks, 'footer').detail, /bundle names 1\.0\.0 · no tag/)
+    },
+  )
+})
+
+test('a stale bundle beside a fresh Worker is caught by the footer', async () => {
+  await withFixture({ bundleBody: bundle({ version: '0.9.0', tag: 'v0.9.0' }) }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    assert.equal(find(checks, 'health').ok, true)
+    assert.equal(find(checks, 'bundle').ok, true)
+    const footer = find(checks, 'footer')
+    assert.equal(footer.ok, false)
+    assert.match(footer.detail, /the bundle names 0\.9\.0, but this build is 1\.0\.0 — a stale bundle is outliving the Worker/)
+    assert.deepEqual(failures(checks), [`footer: ${footer.detail}`])
+  })
+})
+
+test('a bundle that keeps the version but drops the tag is caught', async () => {
+  await withFixture({ bundleBody: bundle({ version: '1.0.0', tag: null }) }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    const footer = find(checks, 'footer')
+    assert.equal(footer.ok, false)
+    assert.match(footer.detail, /the bundle names no tag, but this build ships as 1\.0\.0 · v1\.0\.0/)
+  })
+})
+
+test('a bundle built before the footer nameplate is caught', async () => {
+  await withFixture({ bundleBody: 'console.log("red queen")' }, async (base, shellPath) => {
+    const checks = await smoke(base, { shellPath, release: RELEASE })
+    const footer = find(checks, 'footer')
+    assert.equal(footer.ok, false)
+    assert.match(footer.detail, /no release label — it predates the footer nameplate/)
   })
 })
 
@@ -286,6 +335,7 @@ test('a shell with no bundle is caught', async () => {
     const checks = await smoke(base, { shellPath, release: RELEASE })
     assert.equal(find(checks, 'shell').ok, true)
     assert.match(find(checks, 'bundle').detail, /loads no JavaScript bundle/)
+    assert.match(find(checks, 'footer').detail, /loads no JavaScript bundle, so the footer cannot name the release here/)
     assert.equal(find(checks, 'styles').ok, true)
     assert.equal(find(checks, 'deployment').ok, false)
   })
@@ -293,7 +343,7 @@ test('a shell with no bundle is caught', async () => {
 
 test('an unreachable host is reported, not thrown', async () => {
   const checks = await smoke('http://127.0.0.1:1', { timeoutMs: 2000, shellPath: `${join(tmpdir(), 'red-queen-smoke-absent')}/index.html` })
-  assert.equal(checks.length, 14)
+  assert.equal(checks.length, 15)
   assert.equal(checks.every((entry) => !entry.ok), true)
   assert.match(checks[0].detail, /fetch failed|ECONNREFUSED|connect/i)
 })

@@ -10,6 +10,9 @@
 // published site does not behave like the release that was just shipped. The
 // served shell must be byte-identical to dist/client/index.html, so a deploy
 // that quietly skipped the latest build fails even though every page answers.
+// The bundle the shell loads must also carry the release /api/health reports: a
+// Worker can be replaced without the assets beside it, and then the footer names
+// a release the server no longer agrees with.
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
@@ -103,6 +106,22 @@ function display(path: string): string {
 }
 
 /**
+ * Release-shaped tokens in the shipped bundle: `1.0.2`, `v1.0.2`, and library
+ * version strings like `19.3.1`. The minifier keeps them as literals, whichever
+ * quote style it settles on, so the token is what the footer can actually print.
+ */
+export function releaseTokens(source: string): Set<string> {
+  return new Set([...source.matchAll(/(?<![\w.])v?\d+\.\d+\.\d+(?![\w.])/g)].map((match) => match[0]))
+}
+
+/** The version-shaped tokens found, for an error message that names its cause. */
+function versionsFound(tokens: Set<string>): string {
+  const versions = [...tokens].filter((token) => !token.startsWith('v')).sort()
+  if (versions.length === 0) return 'no version'
+  return versions.slice(0, 3).join(', ') + (versions.length > 3 ? ', …' : '')
+}
+
+/**
  * Every check the release depends on, as plain data. The CLI prints the list
  * and turns failures into an exit code; the tests run the same list against a
  * local fixture, so a check that stops catching drift is caught itself.
@@ -117,8 +136,13 @@ export async function smoke(base: string = DEFAULT_BASE, options: SmokeOptions =
       signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
     })
 
+  // Both nameplate checks — the Worker's and the bundle's — are compared against
+  // the local build, so the site has to agree with one release, not merely agree
+  // with itself.
+  const expected = options.release ?? buildRelease()
   const checks: Check[] = []
   let html = ''
+  let bundleSource = ''
 
   checks.push(
     await check('shell', async () => {
@@ -161,7 +185,9 @@ export async function smoke(base: string = DEFAULT_BASE, options: SmokeOptions =
         const response = await call(path)
         await expectStatus(response, 200)
         await expectType(response, 'javascript')
-        await response.arrayBuffer()
+        // Kept for the footer check: the nameplate is rendered by this code, so
+        // this is the only place the page's own release is visible to a fetch.
+        bundleSource += await response.text()
         seen.push(`${new URL(path, `${root}/`).pathname} 200`)
       }
       return seen.join(' · ')
@@ -219,7 +245,6 @@ export async function smoke(base: string = DEFAULT_BASE, options: SmokeOptions =
       // The site is expected to name its own release, so a deployment that is
       // not this build fails even when every page answers: the nameplate is
       // baked in at build time, which makes it the cheapest proof of identity.
-      const expected = options.release ?? buildRelease()
       if (!expected) throw new Error('no local build at dist/build.json — run npm run release first')
       if (typeof body.version !== 'string' || body.version === '') {
         throw new Error('the site reports no version — it is serving a Worker built before the release nameplate')
@@ -235,6 +260,43 @@ export async function smoke(base: string = DEFAULT_BASE, options: SmokeOptions =
         throw new Error(`the site reports ${served ?? 'no tag'}, but this build ships as ${expected.tag ?? 'no tag'} — it is serving a different release`)
       }
       return `200 · red-queen ${expected.version} · ${served ?? 'no tag'} — the release this build ships as`
+    }),
+  )
+
+  checks.push(
+    await check('footer', async () => {
+      // The shell only carries `<div id="root">`; the footer is drawn by the
+      // bundle afterwards. So the page's own nameplate can only be read in the
+      // code that will print it — and a Worker that was replaced on its own can
+      // leave an older bundle beside it, showing a release the API denies.
+      if (!expected) throw new Error('no local build at dist/build.json — run npm run release first')
+      if (!bundleSource) throw new Error('the shell loads no JavaScript bundle, so the footer cannot name the release here')
+      if (!bundleSource.includes('untagged build')) {
+        throw new Error('the bundle carries no release label — it predates the footer nameplate')
+      }
+
+      const tokens = releaseTokens(bundleSource)
+      const label = `${expected.version}${expected.tag ? ` · ${expected.tag}` : ' · no tag'}`
+      if (!tokens.has(expected.version)) {
+        throw new Error(`the bundle names ${versionsFound(tokens)}, but this build is ${expected.version} — a stale bundle is outliving the Worker`)
+      }
+      if (expected.tag) {
+        if (!tokens.has(expected.tag)) {
+          const stale = [...tokens].filter((token) => token.startsWith('v') && /\d/.test(token)).sort()
+          throw new Error(
+            `the bundle names ${stale.length ? stale.slice(0, 3).join(', ') : 'no tag'}, but this build ships as ${label} — a stale bundle is outliving the Worker`,
+          )
+        }
+        return `bundle names ${label} — the same release /api/health reports`
+      }
+
+      // An untagged build must not carry a tag, or the footer would claim a
+      // release the API says does not exist.
+      const stray = [...tokens].filter((token) => token.startsWith('v') && /\d/.test(token)).sort()
+      if (stray.length) {
+        throw new Error(`the bundle names ${stray.slice(0, 3).join(', ')}, but this build is ${label} — a stale bundle is outliving the Worker`)
+      }
+      return `bundle names ${label} — the same release /api/health reports`
     }),
   )
 

@@ -604,7 +604,11 @@ failure names both asset bundles. The site also has to name its own release:
 `define` in [vite.config.ts](vite.config.ts)), and those must match
 `dist/build.json`, so a Worker from an older build is caught by its own
 nameplate — a site that reports no version at all is one built before the
-endpoint said anything but `{ ok, service }`. `npm run smoke -- https://…` checks another
+endpoint said anything but `{ ok, service }`. Because the footer is drawn by
+the bundle rather than the shell, the smoke test also reads the bundle the
+shell loads and requires the release baked there to be the pair `/api/health`
+reports: a Worker replaced without its assets beside it would otherwise leave
+a footer naming a release the API denies. `npm run smoke -- https://…` checks another
 deployment; a 503 is reported as a hosting pause, not an app failure. What was
 deployed and how it answered is logged in [RELEASES.md](RELEASES.md) — build
 hash, release tag, environment and smoke result, one row per deployment, written by
