@@ -17,6 +17,10 @@ const repo = fileURLToPath(new URL('../..', import.meta.url))
 const installer = join(repo, 'install.sh')
 const body = readFileSync(installer, 'utf8')
 
+// The version the installer announces comes from package.json, so the test asks
+// the same file rather than pinning a number that a release bump would break.
+const version = (JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')) as { version: string }).version
+
 const scratchDirs: string[] = []
 
 function scratch(prefix: string): string {
@@ -89,7 +93,7 @@ test('installs from the checkout it sits next to, and again is a no-op', { timeo
   const first = runAsFile(['--prefix', prefix, '--mode', 'metal', '--no-service', '--no-launch'])
   assert.equal(first.status, 0, first.stderr)
   assert.match(first.stdout, /Installing from /)
-  assert.match(first.stdout, /Installed Red Queen 1\.0\.0 · metal/)
+  assert.match(first.stdout, new RegExp(`Installed Red Queen ${version.replaceAll('.', '\\.')} · metal`))
   assert.match(first.stdout, /Install only\. Start it when you want it\./)
 
   const installed = marker(prefix, 'metal')
