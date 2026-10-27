@@ -173,8 +173,20 @@ async function startServing(installed: Installed, mode: Mode) {
   child.stderr?.on('data', (chunk) => {
     stderr += String(chunk)
   })
+  try {
+    return await checks(mode, child, port, () => stderr)
+  } catch (error) {
+    // A check that fails here must not leave the server behind. Its pipes keep
+    // this file's process alive, so one leaked server turns a fast, readable
+    // failure into a job that runs until the runner gives up on it.
+    await stop(child)
+    throw error
+  }
+}
+
+async function checks(mode: Mode, child: ChildProcess, port: number, readStderr: () => string) {
   const base = `http://127.0.0.1:${port}`
-  const home = await waitFor(`${base}/`, child, () => stderr)
+  const home = await waitFor(`${base}/`, child, readStderr)
   assert.match(await home.text(), /<div id="root"><\/div>/)
 
   const spa = await fetch(`${base}/workbench`)
@@ -189,8 +201,14 @@ async function startServing(installed: Installed, mode: Mode) {
   // The COS-G page reads the machine through the server that serves the page, so
   // an install that cannot answer this leaves the panel guessing. A sandbox copy
   // is confined to its own directory by its permission flags: it must say so
-  // rather than report a host it never looked at.
-  const host = (await (await fetch(`${base}/api/host`)).json()) as {
+  // rather than report a host it never looked at. The request is bounded, so a
+  // sweep that blocks on some host fails this check instead of hanging the run.
+  const pciRoot = '/sys/bus/pci/devices'
+  const onTheMachine = process.platform === 'linux' && existsSync(pciRoot)
+  // Read the same sysfs the sweep reads, so the count is compared against the
+  // machine rather than against a number that happens to be true on one of them.
+  const devicesHere = onTheMachine ? readdirSync(pciRoot).length : 0
+  const host = (await (await fetch(`${base}/api/host`, { signal: AbortSignal.timeout(20_000) })).json()) as {
     available: boolean
     mode: string
     reason: string
@@ -204,9 +222,9 @@ async function startServing(installed: Installed, mode: Mode) {
   if (mode === 'sandbox') {
     assert.equal(host.available, false)
     assert.match(host.reason, /sandbox install/, 'a confined copy says why it cannot see the machine')
-  } else if (process.platform === 'linux' && existsSync('/sys/bus/pci/devices')) {
+  } else if (onTheMachine) {
     assert.equal(host.available, true, 'the sweep reads the machine this install sits on')
-    assert.ok(host.counts.devices > 0, 'the sweep found no PCI devices at all')
+    assert.equal(host.counts.devices, devicesHere, 'the sweep counted a different number of PCI devices than the machine has')
   }
 
   const exported = await fetch(`${base}/api/export`, {
