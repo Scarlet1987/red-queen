@@ -303,6 +303,32 @@ test('a bundle that keeps the version but drops the tag is caught', async () => 
   })
 })
 
+test('a build logged past its tag passes when the bundle names that whole tag', async () => {
+  const past = { version: '1.0.0', tag: 'v1.0.0-10-g6ba4f6a' }
+  await withFixture(
+    { healthBody: { ok: true, service: 'red-queen', ...past }, bundleBody: bundle(past) },
+    async (base, shellPath) => {
+      const checks = await smoke(base, { shellPath, release: past })
+      assert.deepEqual(failures(checks), [])
+      assert.match(find(checks, 'footer').detail, /bundle names 1\.0\.0 · v1\.0\.0-10-g6ba4f6a — the same release \/api\/health reports/)
+    },
+  )
+})
+
+test('a bundle left one commit behind the tag this build carries is caught', async () => {
+  const past = { version: '1.0.0', tag: 'v1.0.0-10-g6ba4f6a' }
+  await withFixture(
+    { healthBody: { ok: true, service: 'red-queen', ...past }, bundleBody: bundle({ version: '1.0.0', tag: 'v1.0.0-9-g0123456' }) },
+    async (base, shellPath) => {
+      const checks = await smoke(base, { shellPath, release: past })
+      const footer = find(checks, 'footer')
+      assert.equal(footer.ok, false)
+      assert.match(footer.detail, /the bundle names v1\.0\.0-9-g0123456, but this build ships as 1\.0\.0 · v1\.0\.0-10-g6ba4f6a — a stale bundle is outliving the Worker/)
+      assert.deepEqual(failures(checks), [`footer: ${footer.detail}`])
+    },
+  )
+})
+
 test('a bundle built before the footer nameplate is caught', async () => {
   await withFixture({ bundleBody: 'console.log("red queen")' }, async (base, shellPath) => {
     const checks = await smoke(base, { shellPath, release: RELEASE })

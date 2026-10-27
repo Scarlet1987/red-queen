@@ -48,10 +48,12 @@ failure: an honest warning is not a deployment. The Node, tag and check rules bi
 current build, and a dashed tag on that row passes: a build can ship before any
 tag names it. The dashes and short rows on older rows are history, not drift.
 
-> **Build status:** `dist/build.json` is `ae12da6ac2db`, which matches the newest logged build.
+> **Build status:** `dist/build.json` is `da5e84b97954`, which matches the newest logged build.
 
 | Deployed (UTC) | Environment | Build | Tag | Node | Smoke | Checks | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-27 20:30 | production | `da5e84b97954` — 1.0.2, built 20:27 | v1.0.2-10-g6ba4f6a | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty | 3 warnings — blacklisted-driver, stale-dkms, dkms-not-built on 7.2.6-76070206-generic |
+| 2026-10-27 20:27 | preview | `da5e84b97954` — 1.0.2, built 20:27 | v1.0.2-10-g6ba4f6a | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty | 3 warnings — blacklisted-driver, stale-dkms, dkms-not-built on 7.2.6-76070206-generic |
 | 2026-10-26 02:51 | production | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty | 4 warnings — blacklisted-driver, stale-dkms, dkms-not-built on 7.2.6-76070206-generic |
 | 2026-10-26 02:51 | preview | `ae12da6ac2db` — 1.0.2, built 02:50 | v1.0.2 | v24.17.0 | 15/15 | shell, deployment, bundle, styles, route /directory, route /tool/ghidra, route /rack, route /safety, route /cosg, route /cosg/worksheet, cover, health, footer, export, export empty | 4 warnings — blacklisted-driver, stale-dkms, dkms-not-built on 7.2.6-76070206-generic |
 | 2026-10-26 01:23 | production | `71ff1b4f67a7` — 1.0.1, built 01:22 | v1.0.1 | v24.17.0 | 14/14 |

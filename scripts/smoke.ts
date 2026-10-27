@@ -126,12 +126,16 @@ function display(path: string): string {
 }
 
 /**
- * Release-shaped tokens in the shipped bundle: `1.0.2`, `v1.0.2`, and library
- * version strings like `19.3.1`. The minifier keeps them as literals, whichever
- * quote style it settles on, so the token is what the footer can actually print.
+ * Release-shaped tokens in the shipped bundle: `1.0.2`, `v1.0.2`, a tag that has
+ * moved past its release like `v1.0.2-10-g6ba4f6a`, and library version strings
+ * like `19.3.1`. The minifier keeps them as literals, whichever quote style it
+ * settles on, so the token is what the footer can actually print. The describe
+ * suffix is part of the token rather than a trailing version: a build logged
+ * past its tag ships that whole string, so reading only `v1.0.2` out of it would
+ * call a current bundle stale.
  */
 export function releaseTokens(source: string): Set<string> {
-  return new Set([...source.matchAll(/(?<![\w.])v?\d+\.\d+\.\d+(?![\w.])/g)].map((match) => match[0]))
+  return new Set([...source.matchAll(/(?<![\w.])v?\d+\.\d+\.\d+(?:-\d+-g[0-9a-f]+)?(?![\w.])/g)].map((match) => match[0]))
 }
 
 /** The version-shaped tokens found, for an error message that names its cause. */

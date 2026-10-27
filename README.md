@@ -648,10 +648,12 @@ same pair.
 
 Site `1710b6be-1a28-4f44-ba17-420cb5e348b8` on Freebuff Sites; both
 environments are published and serve the same build (shell SHA-256
-`dcb0090b…`), and both answer `/api/health` with the same release —
-`{"ok":true,"service":"red-queen","version":"1.0.2","tag":"v1.0.2"}`
-as that build was logged. The installer pins the same tag, so a one-command
-install and the hosted site are the same program.
+`e2d3478d…`), and both answer `/api/health` with the same release —
+`{"ok":true,"service":"red-queen","version":"1.0.2","tag":"v1.0.2-10-g6ba4f6a"}`
+as that build was logged. The installer pins `v1.0.2`, the last tag cut: a
+one-command install gives those bytes, while the hosted build is that tag plus
+the ten commits logged since — so the site runs ahead of a fresh install until
+the next tag names the current tree.
 
 That answer is the site's nameplate, and it is the cheapest way to ask a
 deployment what it is: `curl https://…/api/health` says which version and which
@@ -660,7 +662,8 @@ server state involved. The values are constants substituted at build time, so
 the answer comes from the bytes that are running rather than from a file or a
 lookup that could age.
 
-The footer says the same pair on every page — `Version 1.0.2 · v1.0.2` — so a
+The footer says the same pair on every page — `Version 1.0.2 ·
+v1.0.2-10-g6ba4f6a` — so a
 copy running on metal, in a VM or offline names its own release without anyone
 curling the endpoint. A build no tag describes says `untagged build` there
 instead of borrowing the nearest release's name.
