@@ -77,6 +77,7 @@ npm run cosg -- . --report cosg.md   # write a Markdown report
 npm run cosg -- . --strict           # non-zero exit on any finding
 npm run cosg -- --rules              # print the loop for each pass
 npm run cosg -- . --host             # G, plus this machine's drivers and DKMS
+npm run cosg -- . --host --fix       # those fixes as a script, run nothing
 ```
 
 Every pass runs the same loop: **define the problem → select one course of
@@ -161,8 +162,17 @@ instead — beside the report when one was asked for — with the finding each o
 clears above it, and the warnings no command clears named at the end rather than
 left out. The file is written, never run: the sweep reads the machine, and this
 is what changes it. `--fix` without `--host` is refused, since there would be no
-sweep behind it. The sweep needs Linux sysfs and says so plainly, then reports
-nothing, elsewhere.
+sweep behind it.
+
+The run also keeps the findings it worked from beside the script, under the same
+name — `fixes.json` for `fixes.sh` — so running the same command weeks later
+reports what has changed: how many are cleared, which are new, which are still
+there, dated from the copy it compared with. Only warnings are kept, since a
+note needed no action when it was written and so cannot have been cleared since,
+and a copy is only compared with a sweep that could read its machine — an
+unreadable copy is replaced and said to be, rather than reported as a machine
+that lost all its faults. The sweep needs Linux sysfs and says so plainly, then
+reports nothing, elsewhere.
 
 The same sweep is what the COS-G page shows. A local install answers `/api/host`
 with a sweep of the machine it is running on, so the panel on that page reads the

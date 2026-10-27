@@ -7,7 +7,7 @@ import { after, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { scanHost } from '../scripts/host-scan.ts'
-import { blacklistSummary, summarizeHost, type HostFinding, type HostReport } from '../src/lib/host-view.ts'
+import { blacklistSummary, hostRuleLabels, summarizeHost, type HostFinding, type HostReport } from '../src/lib/host-view.ts'
 
 // The host sweep reads real sysfs, /etc/modprobe.d and /var/lib/dkms by default.
 // Every test here points it at a throwaway tree shaped the way Linux shapes the
@@ -611,4 +611,116 @@ test('--fix without a path lands beside the report, under one name', () => {
   // The report and the script are read together, so they are written together.
   assert.ok(existsSync(join(root, 'reports', 'cosg.sh')), 'the script sits beside the report')
   assert.match(run.stdout, /Fixes written to .*cosg\.sh\. Nothing in it has been run\./)
+})
+
+/**
+ * The remedy tests below read what the sweep found on this machine, so a machine
+ * it cannot read is a failure to say out loud rather than a quiet pass.
+ */
+function requireHostSweep(): void {
+  assert.equal(process.platform, 'linux', 'the host sweep reads Linux sysfs')
+}
+
+/** The warnings the sweep reports right now, as the CLI's own JSON describes them. */
+function currentWarnings(root: string): CliFinding[] {
+  const json = spawnSync(process.execPath, [cli, root, '--json', '--host'], { cwd: repo, encoding: 'utf8' })
+  assert.ok(json.stdout, `COS-G printed no JSON. stderr: ${json.stderr}`)
+  const report = JSON.parse(json.stdout) as { host: { available: boolean; kernel: string; findings: CliFinding[] } }
+  assert.equal(report.host.available, true, 'the fixture project should sweep this machine')
+  return report.host.findings.filter((finding) => finding.severity === 'warn')
+}
+
+test('a fix run keeps the findings beside the script, and the next one compares with them', () => {
+  requireHostSweep()
+  const root = plainProject('red-queen-fix-kept-')
+  const script = join(root, 'fixes.sh')
+  const kept = join(root, 'fixes.json')
+  const warnings = currentWarnings(root)
+
+  const first = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(first.status, 0, first.stderr)
+  assert.ok(existsSync(kept), 'the findings are kept beside the script')
+  assert.match(first.stdout, /Findings kept in .*fixes\.json, for a later run to compare against\./)
+  assert.ok(!/^  since {3}/m.test(first.stdout), 'a first run has nothing to compare with')
+
+  // The copy holds the warnings, and only the warnings: a note needed no action
+  // when it was written, so it cannot be reported as cleared later.
+  const copy = JSON.parse(readFileSync(kept, 'utf8')) as { kind: string; kernel: string; findings: { message: string }[] }
+  assert.equal(copy.kind, 'red-queen/host-findings')
+  assert.deepEqual(copy.findings.map((finding) => finding.message), warnings.map((finding) => finding.message))
+
+  // The same command later: the machine has not moved, so neither has what it
+  // says — which is the answer a run weeks from now has to be able to give.
+  const second = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, new RegExp(`since\\s+\\S+ \\S+ · nothing changed: ${warnings.length} warnings? as before`))
+  const again = JSON.parse(readFileSync(kept, 'utf8')) as { generatedAt: string }
+  assert.ok(again.generatedAt, 'the copy is rewritten from the latest sweep')
+})
+
+test('a kept copy from an earlier run says what has changed since', () => {
+  requireHostSweep()
+  const root = plainProject('red-queen-fix-since-')
+  const script = join(root, 'fixes.sh')
+  const kept = join(root, 'fixes.json')
+  const warnings = currentWarnings(root)
+
+  // A copy from a machine that had a ghost this one does not: the run has to say
+  // that one is cleared, and everything it does have is new against that copy.
+  writeFileSync(
+    kept,
+    JSON.stringify(
+      {
+        program: 'Red Queen',
+        kind: 'red-queen/host-findings',
+        generatedAt: '2026-01-02T03:04:05.000Z',
+        kernel: '6.1.0',
+        available: true,
+        findings: [{ rule: 'idle-driver', severity: 'warn', message: 'ghost-driver is loaded but driving nothing here — from an earlier run.' }],
+      },
+      null,
+      2,
+    ) + '\n',
+  )
+
+  const run = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(run.status, 0, run.stderr)
+  const counts = `1 cleared, ${warnings.length} new, 0 unchanged`
+  assert.ok(
+    run.stdout.includes(`  since   2026-01-02 03:04 · ${counts}`),
+    `the console dates the comparison: ${run.stdout.split('\n').find((line) => line.includes('since')) ?? 'no since line'}`,
+  )
+  assert.match(run.stdout, /gone\s+Driver doing nothing — ghost-driver is loaded but driving nothing here/)
+  assert.ok(readFileSync(script, 'utf8').includes(`# Since 2026-01-02 03:04: ${counts}.`), 'the script carries the comparison too')
+  // Every warning this machine does have is named as new against that copy, by
+  // rule and message rather than by a bare count.
+  for (const finding of warnings) {
+    const label = hostRuleLabels[finding.rule as keyof typeof hostRuleLabels]
+    assert.ok(run.stdout.includes(`  new     ${label} — ${finding.message}`), `the delta names it as new: ${finding.message}`)
+  }
+
+  // The copy is replaced, so the next run compares against this one rather than
+  // reporting the same clearing every time it is asked.
+  const replaced = JSON.parse(readFileSync(kept, 'utf8')) as { findings: { message: string }[] }
+  assert.deepEqual(replaced.findings.map((finding) => finding.message), warnings.map((finding) => finding.message))
+  assert.ok(!readFileSync(kept, 'utf8').includes('ghost-driver'), 'a clearing is not reported twice')
+})
+
+test('a kept copy that cannot be read is replaced without a claimed comparison', () => {
+  requireHostSweep()
+  const root = plainProject('red-queen-fix-unreadable-')
+  // Written outside the scanned tree: a broken JSON file inside it is a syntax
+  // finding of its own, which is the checker doing its job, not what this tests.
+  const out = mkdtempSync(join(tmpdir(), 'red-queen-fix-out-'))
+  scratch.push(out)
+  const script = join(out, 'fixes.sh')
+  const kept = join(out, 'fixes.json')
+  writeFileSync(kept, 'this is not the findings file\n')
+
+  const run = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(run.status, 0, run.stderr)
+  assert.match(run.stdout, /could not be read, so nothing here is compared with it/)
+  assert.ok(!/^  since {3}/m.test(run.stdout), 'an unreadable copy invents no comparison')
+  const replaced = JSON.parse(readFileSync(kept, 'utf8')) as { kind: string }
+  assert.equal(replaced.kind, 'red-queen/host-findings', 'the unreadable copy is replaced with a readable one')
 })

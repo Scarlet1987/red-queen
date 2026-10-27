@@ -16,9 +16,9 @@
 //   npm run cosg -- . --host --fix   the same machine's remedies, as a script
 //
 // The checker never executes, edits or deletes the code it scans, and it never
-// runs a remedy. It only reads files, and writes a report or a fix script when
-// you ask for one.
-import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+// runs a remedy. It only reads files, and writes a report, a fix script, or the
+// findings the fix script came from when you ask for one.
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
@@ -640,11 +640,115 @@ if (asJson) {
 }
 
 /**
+ * What the sweep said about a finding, in the shape a file keeps. A finding is
+ * identified by its rule and its message — the message names the device, module
+ * or path — so a copy can be compared with a sweep run weeks later, when the
+ * machine, the kernel or the driver on it has moved.
+ */
+interface KeptFinding {
+  rule: string
+  severity: string
+  message: string
+  file?: string
+}
+
+interface Snapshot {
+  generatedAt: string
+  kernel: string
+  available: boolean
+  findings: KeptFinding[]
+}
+
+/** Marks the copy as ours, so an unrelated fixes.json is not read as one. */
+const SNAPSHOT_KIND = 'red-queen/host-findings'
+
+/** Which findings a later sweep found gone, new, or still there. */
+interface Delta {
+  at: string
+  cleared: KeptFinding[]
+  added: KeptFinding[]
+  unchanged: number
+}
+
+const findingKey = (finding: KeptFinding) => `${finding.rule}\u0000${finding.message}`
+
+/**
+ * The warnings, and only the warnings: an info finding is a note that needed no
+ * action when it was written, so it cannot have been cleared later.
+ */
+function keptFindings(report: HostReport): KeptFinding[] {
+  return report.findings
+    .filter((finding) => finding.severity === 'warn')
+    .map((finding) => ({
+      rule: finding.rule,
+      severity: finding.severity,
+      message: finding.message,
+      ...(finding.file ? { file: finding.file } : {}),
+    }))
+}
+
+/** The copy beside the script, or null when there is none to read. */
+function readSnapshot(path: string): Snapshot | null {
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8')) as unknown
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const value = raw as Record<string, unknown>
+  if (value.kind !== SNAPSHOT_KIND || typeof value.generatedAt !== 'string') return null
+  const findings = (Array.isArray(value.findings) ? value.findings : []).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const record = entry as Record<string, unknown>
+    if (typeof record.rule !== 'string' || !record.rule) return []
+    if (typeof record.message !== 'string' || !record.message.trim()) return []
+    const file = typeof record.file === 'string' && record.file ? record.file : undefined
+    return [
+      {
+        rule: record.rule,
+        severity: typeof record.severity === 'string' && record.severity ? record.severity : 'warn',
+        message: record.message.trim(),
+        ...(file ? { file } : {}),
+      },
+    ]
+  })
+  return {
+    generatedAt: value.generatedAt,
+    kernel: typeof value.kernel === 'string' ? value.kernel : '',
+    available: value.available === true,
+    findings,
+  }
+}
+
+/** UTC to the minute, the way a release row writes time. */
+function stampOf(at: string): string {
+  const date = new Date(at)
+  return Number.isNaN(date.getTime()) ? at : date.toISOString().slice(0, 16).replace('T', ' ')
+}
+
+/** A rule's label, or the rule itself when a copy names one this build does not know. */
+function labelOf(rule: string): string {
+  return (hostRuleLabels as Record<string, string | undefined>)[rule] ?? rule
+}
+
+function compareFindings(before: KeptFinding[], after: KeptFinding[], at: string): Delta {
+  const now = new Set(after.map(findingKey))
+  const then = new Set(before.map(findingKey))
+  return {
+    at,
+    cleared: before.filter((finding) => !now.has(findingKey(finding))),
+    added: after.filter((finding) => !then.has(findingKey(finding))),
+    unchanged: after.filter((finding) => then.has(findingKey(finding))).length,
+  }
+}
+
+/**
  * The host remedies as a shell script. Written, never run: the sweep reads the
  * machine, and these commands change it, so the file is something to read first
  * — which is also why every line says what it is for and what it needs.
  */
-function fixScript(report: HostReport): string {
+function fixScript(report: HostReport, delta: Delta | null): string {
   const lines = [
     '#!/bin/sh',
     "# Red Queen — the commands that clear this machine's host findings.",
@@ -662,11 +766,15 @@ function fixScript(report: HostReport): string {
   const warnings = report.findings.filter((finding) => finding.severity === 'warn')
   const runnable = warnings.filter((finding) => finding.remedy)
   const manual = warnings.filter((finding) => !finding.remedy)
-  lines.push(
-    `# ${warnings.length} warning${warnings.length === 1 ? '' : 's'} on kernel ${report.kernel} · ${runnable.length} with a command`,
-    'set -eu',
-    '',
-  )
+  lines.push(`# ${warnings.length} warning${warnings.length === 1 ? '' : 's'} on kernel ${report.kernel} · ${runnable.length} with a command`)
+  // What changed since the copy this was built against, so the script says what
+  // the last run's commands did rather than only what is left.
+  if (delta) {
+    lines.push(
+      `# Since ${stampOf(delta.at)}: ${delta.cleared.length} cleared, ${delta.added.length} new, ${delta.unchanged} unchanged.`,
+    )
+  }
+  lines.push('set -eu', '')
   for (const finding of runnable) {
     lines.push(`# ${hostRuleLabels[finding.rule]} — ${finding.message}`, finding.remedy?.command ?? '', '')
   }
@@ -687,8 +795,41 @@ if (reportPath) {
 }
 
 if (fixPath && host) {
-  writeFileSync(resolve(process.cwd(), fixPath), fixScript(host))
+  const scriptTarget = resolve(process.cwd(), fixPath)
+  // Beside the script, under the same name: the two are read together, and a
+  // copy with no script next to it would be a findings file with no fix.
+  const keptTarget = scriptTarget.replace(/\.[^./\\]*$/, '') + '.json'
+  const keptLabel = fixPath.replace(/\.[^./\\]*$/, '') + '.json'
+  const present = existsSync(keptTarget)
+  const before = present ? readSnapshot(keptTarget) : null
+  // Only two readable sweeps can be compared: a copy from a machine that could
+  // not be read says nothing about what has changed on one that can.
+  const delta = before && before.available && host.available ? compareFindings(before.findings, keptFindings(host), before.generatedAt) : null
+
+  writeFileSync(scriptTarget, fixScript(host, delta))
   if (!asJson) console.log(`Fixes written to ${fixPath}. Nothing in it has been run.`)
+
+  if (host.available) {
+    const snapshot = { program: 'Red Queen', kind: SNAPSHOT_KIND, generatedAt: new Date().toISOString(), kernel: host.kernel, available: true, findings: keptFindings(host) }
+    writeFileSync(keptTarget, JSON.stringify(snapshot, null, 2) + '\n')
+    if (asJson) {
+      // Nothing to say on a JSON run: the answer is the JSON.
+    } else if (delta && (delta.cleared.length > 0 || delta.added.length > 0)) {
+      console.log(`Findings kept in ${keptLabel}.`)
+      console.log(`  since   ${stampOf(delta.at)} · ${delta.cleared.length} cleared, ${delta.added.length} new, ${delta.unchanged} unchanged`)
+      for (const finding of delta.cleared) console.log(`  gone    ${labelOf(finding.rule)} — ${finding.message}`)
+      for (const finding of delta.added) console.log(`  new     ${labelOf(finding.rule)} — ${finding.message}`)
+    } else if (delta) {
+      console.log(`Findings kept in ${keptLabel}.`)
+      console.log(`  since   ${stampOf(delta.at)} · nothing changed: ${delta.unchanged} warning${delta.unchanged === 1 ? '' : 's'} as before`)
+    } else if (present) {
+      console.log(`Findings kept in ${keptLabel}. The copy already there could not be read, so nothing here is compared with it.`)
+    } else {
+      console.log(`Findings kept in ${keptLabel}, for a later run to compare against.`)
+    }
+  } else if (!asJson) {
+    console.log('The sweep could not read this machine, so there were no findings to keep.')
+  }
 }
 
 const failedSyntax = counts.S > 0
