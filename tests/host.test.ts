@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, test } from 'node:test'
@@ -509,10 +509,19 @@ test('--host adds the machine to the report and does not fail the run', () => {
 
   const result = spawnSync(process.execPath, [cli, root, '--json', '--host'], { cwd: repo, encoding: 'utf8' })
   assert.ok(result.stdout, `COS-G printed no JSON. stderr: ${result.stderr}`)
+  interface Remedy {
+    command: string
+    root: boolean
+  }
+  interface ReportedFinding {
+    rule: string
+    remedy?: Remedy
+  }
   const report = JSON.parse(result.stdout) as {
     total: number
     counts: { G: number }
-    host: { available: boolean; devices: unknown[]; findings: unknown[] } | null
+    host: { available: boolean; devices: unknown[]; findings: ReportedFinding[] } | null
+    findings: { G: ReportedFinding[] }
   }
   assert.equal(result.status, 0, 'host findings are warnings, not a failing exit')
   assert.ok(report.host, 'the report carries a host section when asked for one')
@@ -521,4 +530,25 @@ test('--host adds the machine to the report and does not fail the run', () => {
     assert.ok(report.host.devices.length > 0, 'a Linux machine lists its PCI devices')
   }
   assert.ok(report.counts.G >= report.host.findings.length)
+
+  // A remedy is a whole command or none at all. These are what the COS-G page
+  // offers as a Copy button and what the report prints for a paste, so a half
+  // filled one would send someone to a terminal with nothing to run.
+  for (const finding of report.host.findings) {
+    if (!finding.remedy) continue
+    assert.ok(finding.remedy.command.trim(), `the remedy for ${finding.rule} carries a command`)
+    assert.equal(typeof finding.remedy.root, 'boolean', `the remedy for ${finding.rule} says whether it needs root`)
+  }
+
+  // The terminal hands over the same command the page shows: one `fix:` line per
+  // printed finding that carries a remedy, and none invented for one that does
+  // not. The counts are compared rather than the text, since which faults a
+  // machine has is the machine's business; the printed findings are the ones the
+  // console actually reaches, since it stops after twelve.
+  const carried = report.findings.G.slice(0, 12).filter((finding) => finding.remedy).length
+  const reportFile = join(root, 'report.md')
+  const printed = spawnSync(process.execPath, [cli, root, '--host', '--report', reportFile], { cwd: repo, encoding: 'utf8' })
+  assert.ok(printed.stdout, `COS-G printed no report. stderr: ${printed.stderr}`)
+  assert.equal((printed.stdout.match(/^\s+fix: /gm) ?? []).length, carried, 'the console prints one fix line per remedy')
+  assert.equal((readFileSync(reportFile, 'utf8').match(/^  - Fix: /gm) ?? []).length, carried, 'the Markdown report prints one fix line per remedy')
 })

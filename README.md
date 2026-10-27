@@ -152,8 +152,12 @@ its module's — `i2c_i801` is bound as `i801_smbus`.
 The text report counts blacklisted modules per file, because a stock distro
 blocks a hundred of them and the list would bury the finding that matters;
 `--json` carries the full device, blacklist, loaded-module and DKMS detail. Host findings are
-warnings, so `--host` never fails a build — `--strict` is the exception. The
-sweep needs Linux sysfs and says so plainly, then reports nothing, elsewhere.
+warnings, so `--host` never fails a build — `--strict` is the exception. A
+finding with a fix prints the command for it, as a `fix:` line under the finding
+in the console and a `Fix:` line in the Markdown report — the same command the
+COS-G page offers beside its Copy button, so the terminal and the page hand over
+one thing rather than two. The sweep needs Linux sysfs and says so plainly, then
+reports nothing, elsewhere.
 
 The same sweep is what the COS-G page shows. A local install answers `/api/host`
 with a sweep of the machine it is running on, so the panel on that page reads the

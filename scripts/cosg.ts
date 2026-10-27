@@ -20,7 +20,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFile
 import { extname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
-import { blacklistSummary, type HostReport } from '../src/lib/host-view.ts'
+import { blacklistSummary, type HostRemedy, type HostReport } from '../src/lib/host-view.ts'
 import { extended, labels, playbooks, type Category } from './doctrine.ts'
 import { scanHost } from './host-scan.ts'
 
@@ -32,6 +32,12 @@ interface Finding {
   message: string
   file?: string
   line?: number
+  /**
+   * The command that clears it, carried by `--host` findings and by nothing
+   * else: a crash risk in a source file is not fixed by pasting a line, and
+   * inventing one for it would be a remedy the sweep never read.
+   */
+  remedy?: HostRemedy
 }
 
 interface Entry {
@@ -496,7 +502,7 @@ let host: HostReport | null = null
 if (hostFlag) {
   host = scanHost()
   for (const finding of host.findings) {
-    add('G', { rule: finding.rule, severity: finding.severity, message: finding.message, file: finding.file })
+    add('G', { rule: finding.rule, severity: finding.severity, message: finding.message, file: finding.file, remedy: finding.remedy })
   }
 }
 
@@ -537,6 +543,7 @@ function markdown(): string {
     for (const finding of findings[category]) {
       const where = finding.file ? `\`${finding.file}${finding.line ? `:${finding.line}` : ''}\` ` : ''
       lines.push(`- ${finding.severity.toUpperCase()} ${where}${finding.message} _(${finding.rule})_`)
+      if (finding.remedy) lines.push(`  - Fix: \`${finding.remedy.command}\`${finding.remedy.root ? ' (needs root)' : ''}`)
     }
     lines.push('')
   }
@@ -578,6 +585,9 @@ if (asJson) {
     for (const finding of list.slice(0, 12)) {
       const where = finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ''}` : ''
       console.log(`  ${finding.severity.padEnd(5)} ${where}${where ? ' — ' : ''}${finding.message}`)
+      // The command the COS-G page offers for the same finding, so the terminal
+      // hands over what to run rather than only what is wrong.
+      if (finding.remedy) console.log(`        fix: ${finding.remedy.command}${finding.remedy.root ? ' (needs root)' : ''}`)
     }
     if (list.length > 12) console.log(`  …and ${list.length - 12} more`)
     console.log('')
