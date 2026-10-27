@@ -132,6 +132,42 @@ test('the blacklist line counts files rather than printing a distro’s worth of
   )
 })
 
+test('a remedy arrives from the server whole, and one that says nothing is dropped', () => {
+  const view = cleanHostView({
+    available: true,
+    reason: '',
+    mode: 'metal',
+    kernel: '7.2.6',
+    cell: '2 warnings — idle-driver on 7.2.6',
+    counts: { devices: 2, blacklisted: 0, loaded: 2, dkms: 0 },
+    findings: [
+      {
+        rule: 'idle-driver',
+        severity: 'warn',
+        message: 'nouveau is loaded but driving nothing here.',
+        remedy: { command: 'sudo rmmod nouveau', root: true },
+      },
+      // A remedy with no command is not an empty button to render.
+      { rule: 'idle-driver', severity: 'warn', message: 'and another.', remedy: { command: '   ' } },
+      // A command whose root claim cannot be read keeps the command and drops
+      // the claim, rather than telling someone an app will not run for them.
+      { rule: 'idle-driver', severity: 'warn', message: 'a third.', remedy: { command: 'rmmod nouveau' } },
+      // A server answering with prose where an object goes is no remedy either.
+      { rule: 'idle-driver', severity: 'warn', message: 'a fourth.', remedy: 'sudo rmmod nouveau' },
+    ],
+  })
+  assert.ok(view, 'the answer did not pass the panel’s validation')
+  assert.deepEqual(
+    view.findings.map((finding) => finding.remedy),
+    [
+      { command: 'sudo rmmod nouveau', root: true },
+      undefined,
+      { command: 'rmmod nouveau', root: false },
+      undefined,
+    ],
+  )
+})
+
 // --- the route -------------------------------------------------------------
 //
 // The hosted Worker has no filesystem, so this route is the one place a machine

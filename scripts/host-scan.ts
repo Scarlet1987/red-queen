@@ -23,7 +23,7 @@ import { basename, join } from 'node:path'
 // hosted Worker can load it as well as this sweep. Type-only, deliberately —
 // this file is transpiled on its own into the offline bundle, where an import of
 // a value from src/lib could not be resolved.
-import type { HostBlacklist, HostDevice, HostDkms, HostFinding, HostModule, HostReport } from '../src/lib/host-view.ts'
+import type { HostBlacklist, HostDevice, HostDkms, HostFinding, HostModule, HostRemedy, HostReport } from '../src/lib/host-view.ts'
 
 // Re-exported so the CLI, the release log and the tests keep reading the sweep's
 // own types from the sweep.
@@ -339,6 +339,23 @@ function claimants(aliases: Alias[], modalias: string): string[] {
 }
 
 /**
+ * Where a record whose source is gone is put: out of dkms' way, still on the
+ * machine, because "this record is broken" and "this driver is unwanted" are
+ * not the same claim and only the first one was read from the filesystem.
+ */
+const STALE_BACKUP = '/var/backups/red-queen'
+
+/**
+ * Hardware with no driver whose module exists is one load away from having one,
+ * so that load is the remedy. Several candidates are tried in turn: which of
+ * them takes depends on the hardware, and a link in the chain that fails only
+ * means the next one is this device's driver.
+ */
+function loadCandidates(candidates: string[]): HostRemedy {
+  return { command: candidates.map((module) => `sudo modprobe ${module}`).join(' || '), root: true }
+}
+
+/**
  * A loaded PCI driver that is not driving anything on this machine: the
  * hardware it was loaded for is absent, unplugged, or held by another driver.
  * The two cases read differently because the remedy differs — a device that is
@@ -354,6 +371,7 @@ function idleDriver(name: string, slots: string[], servers: string[]): HostFindi
     rule: 'idle-driver',
     severity: 'warn',
     message: `${name} is loaded but driving nothing here — ${state}, and nothing depends on it. rmmod ${name} frees it; check what loads it before blocking it in /etc/modprobe.d.`,
+    remedy: { command: `sudo rmmod ${name}`, root: true },
   }
 }
 
@@ -376,6 +394,7 @@ function loadedAnyway(module: string, live: HostModule, blacklists: HostBlacklis
     severity: 'warn',
     message: `${module} is blacklisted in ${list(files)} but is loaded right now${why} — a blacklist only stops alias loading, so a softdep or an explicit modprobe still gets it in. rmmod ${module} once nothing needs it, or fix whatever loads it.`,
     file: blacklists.find((entry) => entry.module === module)?.file,
+    remedy: { command: `sudo rmmod ${module}`, root: true },
   }
 }
 
@@ -449,7 +468,8 @@ export function scanHost(options: HostOptions = {}): HostReport {
       findings.push({
         rule: 'blacklisted-driver',
         severity: 'warn',
-        message: `${device.slot} ${device.name} (${device.kind}) has no driver — ${candidates} blacklisted (${files.join(', ')}).`,
+        message: `${device.slot} ${device.name} (${device.kind}) has no driver — ${candidates} blacklisted (${files.join(', ')}). A blacklist stops alias loading rather than an explicit load, so loading one by hand still binds it.`,
+        remedy: loadCandidates(blockedHere),
       })
       continue
     }
@@ -465,6 +485,7 @@ export function scanHost(options: HostOptions = {}): HostReport {
       rule: 'unbound-hardware',
       severity: 'warn',
       message: `${device.slot} ${device.name} (${device.kind}) has no driver bound; ${list(candidates)} ${candidates.length === 1 ? 'claims' : 'claim'} it but ${candidates.length === 1 ? 'is not' : 'are not'} blacklisted.`,
+      remedy: loadCandidates(candidates),
     })
   }
 
@@ -539,8 +560,9 @@ export function scanHost(options: HostOptions = {}): HostReport {
     findings.push({
       rule: 'stale-dkms',
       severity: 'warn',
-      message: `DKMS record ${record.name} ${record.version} has no source/dkms.conf, so dkms status fails on it. Remove ${record.path} once nothing owns it.`,
+      message: `DKMS record ${record.name} ${record.version} has no source/dkms.conf, so dkms status fails on it. Move that record out of /var/lib/dkms once nothing owns it — dkms reports normally without it, and nothing is uninstalled by moving it.`,
       file: record.path,
+      remedy: { command: `sudo mkdir -p ${STALE_BACKUP} && sudo mv ${record.path} ${STALE_BACKUP}/`, root: true },
     })
   }
 
@@ -599,6 +621,7 @@ export function scanHost(options: HostOptions = {}): HostReport {
       // Point at the version a rebuild would act on, not at a broken sibling
       // that happens to sort first.
       file: records.find((record) => record.conf)?.path,
+      remedy: { command: 'sudo dkms autoinstall', root: true },
     })
   }
 

@@ -13,6 +13,22 @@ export type HostRule =
   | 'stale-dkms'
   | 'dkms-not-built'
 
+/**
+ * The fix for a finding, when one command is the fix. The command is written to
+ * be pasted as it stands and names the module, device or path it acts on rather
+ * than pointing back at the finding: the panel offers it as a Copy button, and a
+ * command on the clipboard has no message beside it.
+ */
+export interface HostRemedy {
+  command: string
+  /**
+   * Whether clearing the finding needs root. The panel says so rather than
+   * letting the paste fail, which is what the findings needing a shell were
+   * read from a terminal for.
+   */
+  root: boolean
+}
+
 export interface HostFinding {
   rule: HostRule
   /** Warn for hardware that is dark or a record that breaks a tool; info otherwise. */
@@ -20,6 +36,12 @@ export interface HostFinding {
   message: string
   /** The file the finding is about, when it is about a file rather than a device. */
   file?: string
+  /**
+   * The command that clears it; absent when no single command does — hardware
+   * nothing in this kernel claims has no module to load, and a block that was
+   * meant to be there has nothing to undo.
+   */
+  remedy?: HostRemedy
 }
 
 export interface HostDevice {

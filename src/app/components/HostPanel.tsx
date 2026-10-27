@@ -3,10 +3,10 @@
 // here: hardware with no driver, a block that is not holding, a driver doing
 // nothing, a DKMS record with no build. One request when the page opens, one
 // button to read it again, and nothing else added to the page.
-import { RefreshCw } from 'lucide-react'
+import { Check, ClipboardCopy, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
-import { hostRuleLabels, type HostView } from '../../lib/host-view.ts'
+import { hostRuleLabels, type HostRemedy, type HostView } from '../../lib/host-view.ts'
 import { cx } from '../lib/cx'
 import { fetchHostView } from '../lib/host'
 import { Button } from './ui'
@@ -26,6 +26,47 @@ function detail(state: State): string {
   if (state.status === 'unreachable') return state.message
   if (!state.view.available) return state.view.reason
   return `Read from the ${state.view.mode} copy, on kernel ${state.view.kernel}.`
+}
+
+/**
+ * The command that clears a finding, with the one thing a terminal would have
+ * said: whether it needs root. Copy rather than run — the sweep is read-only and
+ * a finding is a diagnosis, so the page hands over the command instead of
+ * changing the machine it is describing.
+ */
+function RemedyCommand({ remedy }: { remedy: HostRemedy }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(remedy.command)
+      setState('copied')
+    } catch {
+      setState('failed')
+    }
+  }
+
+  return (
+    <div className="mt-0.5 flex w-full flex-wrap items-center gap-2">
+      <code className="scrollbar-none min-w-0 flex-1 overflow-x-auto rounded-[9px] border border-line bg-surface px-2.5 py-1.5 text-[12.5px] whitespace-pre text-fg">
+        {remedy.command}
+      </code>
+      {remedy.root && (
+        <span className="shrink-0 rounded-[8px] border border-line px-2 py-1 text-[11.5px] text-faint" title="Run this as root: it changes the machine.">
+          needs root
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => void copy()}
+        aria-label={`Copy the command that clears this: ${remedy.command}`}
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] border border-line-strong px-2.5 text-[12.5px] text-muted transition-colors hover:border-fg hover:text-fg"
+      >
+        {state === 'copied' ? <Check className="size-3.5" /> : <ClipboardCopy className="size-3.5" />}
+        {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
+      </button>
+    </div>
+  )
 }
 
 function stats(view: HostView): { label: string; value: number }[] {
@@ -96,6 +137,7 @@ export function HostPanel() {
                   </span>
                   <p className="max-w-3xl flex-1 text-[14px] leading-relaxed text-muted">{finding.message}</p>
                   {finding.file && <code className="w-full text-[12px] text-faint">{finding.file}</code>}
+                  {finding.remedy && <RemedyCommand remedy={finding.remedy} />}
                 </li>
               ))}
             </ul>

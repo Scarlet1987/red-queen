@@ -6,7 +6,7 @@
 // server that is not running, and the hosted site's single-page fallback (which
 // answers index.html for any path it does not know) all have to end as "no
 // answer", never as a report a component would render as if it were read.
-import { EMPTY_COUNTS, type HostFinding, type HostRule, type HostView } from '../../lib/host-view.ts'
+import { EMPTY_COUNTS, type HostFinding, type HostRemedy, type HostRule, type HostView } from '../../lib/host-view.ts'
 
 export type HostResult = { status: 'ok'; view: HostView } | { status: 'unreachable'; message: string }
 
@@ -27,17 +27,32 @@ function count(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : 0
 }
 
+/**
+ * The command a finding carries, when the answer carries one. A missing or
+ * wordless command is no remedy rather than an empty button, and the root claim
+ * has to be explicit: an unread flag shows the command without the warning that
+ * it will not run as an ordinary user.
+ */
+function remedy(value: unknown): HostRemedy | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (typeof raw.command !== 'string' || !raw.command.trim()) return null
+  return { command: raw.command.trim(), root: raw.root === true }
+}
+
 function finding(value: unknown): HostFinding | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Record<string, unknown>
   if (typeof raw.rule !== 'string' || !RULES.includes(raw.rule as HostRule)) return null
   if (typeof raw.message !== 'string' || !raw.message.trim()) return null
   const file = text(raw.file)
+  const fix = remedy(raw.remedy)
   return {
     rule: raw.rule as HostRule,
     severity: raw.severity === 'warn' ? 'warn' : 'info',
     message: raw.message.trim(),
     ...(file ? { file } : {}),
+    ...(fix ? { remedy: fix } : {}),
   }
 }
 

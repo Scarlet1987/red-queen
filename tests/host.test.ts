@@ -94,6 +94,11 @@ test('an unbound NIC whose drivers are both blacklisted is one finding, not thre
   for (const name of ['0000:6f:00.0', 'r8125', 'r8169', 'blacklist-r8125.conf', 'r8125.conf']) {
     assert.ok(finding.message.includes(name), `the finding names ${name}: ${finding.message}`)
   }
+  // The remedy is the paste, not the diagnosis: a blacklist stops alias loading
+  // rather than an explicit load, so one of these drives the device regardless
+  // of the files that block it. Both candidates are tried, in the sweep's order,
+  // because which of them takes depends on hardware the sweep cannot weigh.
+  assert.deepEqual(finding.remedy, { command: 'sudo modprobe r8125 || sudo modprobe r8169', root: true })
 })
 
 test('bound hardware is reported as bound, and an unclaimed bridge is not a finding', () => {
@@ -122,6 +127,9 @@ test('hardware with no candidate module and no blacklist says so', () => {
   const [finding] = scan(root).findings
   assert.equal(finding.rule, 'unbound-hardware')
   assert.match(finding.message, /no module in .*lib\/modules\/7\.2\.6 claims it/)
+  // Nothing in this kernel claims the device, so there is no load to suggest:
+  // a remedy here would be a guess at a module the sweep cannot see.
+  assert.equal(finding.remedy, undefined)
 })
 
 test('a loaded PCI driver driving nothing on this machine is a ghost', () => {
@@ -140,6 +148,7 @@ test('a loaded PCI driver driving nothing on this machine is a ghost', () => {
   assert.equal(report.findings[0].severity, 'warn')
   assert.match(report.findings[0].message, /^nouveau is loaded but driving nothing here — its aliases match no device on this machine/)
   assert.match(report.findings[0].message, /rmmod nouveau frees it/)
+  assert.deepEqual(report.findings[0].remedy, { command: 'sudo rmmod nouveau', root: true })
 })
 
 test('a loaded driver whose hardware another driver serves names what serves it', () => {
@@ -208,6 +217,7 @@ test('a blacklisted module that is loaded anyway is a ghost, not a deliberate bl
   assert.match(finding.message, /rmmod r8169 once nothing needs it/)
   assert.equal(finding.file?.endsWith('blacklist-r8169.conf'), true, 'the file named is the one that blocks it')
   assert.deepEqual(report.loaded.map((module) => module.name), ['r8125', 'r8169'], 'the loaded table is carried too')
+  assert.deepEqual(finding.remedy, { command: 'sudo rmmod r8169', root: true })
 })
 
 test('a blacklisted module nothing depends on reports what is holding it', () => {
@@ -244,6 +254,9 @@ test('a blacklist over hardware served by another driver is information, not a f
   assert.equal(finding.severity, 'info')
   assert.equal(finding.file, join(root, 'etc', 'modprobe.d', 'r8125.conf'))
   assert.match(finding.message, /served by r8125/)
+  // The block is doing its job — this is the intended setup — so there is
+  // nothing to undo and no command to offer.
+  assert.equal(finding.remedy, undefined)
 })
 
 test('a blacklist file without .conf is ignored, as modprobe ignores it', () => {
@@ -290,6 +303,12 @@ test('a DKMS record with no source is flagged; a healthy one is listed and left 
   assert.equal(rule[0].severity, 'warn')
   assert.equal(rule[0].file, join(root, 'var', 'lib', 'dkms', 'system76', '1.0.22~stale'))
   assert.match(rule[0].message, /dkms status fails/)
+  // Moving the record, not deleting it: the finding is that dkms cannot report,
+  // which says nothing about whether the driver is wanted on this machine.
+  assert.deepEqual(rule[0].remedy, {
+    command: `sudo mkdir -p /var/backups/red-queen && sudo mv ${join(root, 'var', 'lib', 'dkms', 'system76', '1.0.22~stale')} /var/backups/red-queen/`,
+    root: true,
+  })
 })
 
 test('a DKMS package with no build for the running kernel is reported as gone at the next boot', () => {
@@ -323,6 +342,9 @@ test('a DKMS package with no build for the running kernel is reported as gone at
   assert.equal(nvidia.severity, 'warn')
   assert.match(nvidia.message, /built for 7\.1\.5 but not for 7\.2\.6/)
   assert.match(nvidia.message, /after a reboot into 7\.2\.6 it will not be there/)
+  // One command for the whole machine, not one per package: this is the command
+  // that rebuilds every record the source is still there for.
+  assert.deepEqual(nvidia.remedy, { command: 'sudo dkms autoinstall', root: true })
 
   const ack = notBuilt.find((finding) => finding.message.includes('ack'))
   assert.ok(ack, 'a package that was never built is reported too')
@@ -387,6 +409,8 @@ test('a package that excludes this kernel by its own rule is a note, not a warni
   assert.equal(finding.severity, 'info', 'a build that was never asked for is not a failure')
   assert.match(finding.message, /BUILD_EXCLUSIVE_KERNEL_MIN=6\.0 and MAX=7\.1/)
   assert.match(finding.message, /nothing to rebuild/)
+  assert.equal(finding.remedy, undefined, 'a build nobody asked for cannot be rebuilt')
+
   // A note is not a warning: the cell a release row carries counts warnings.
   assert.equal(summarizeHost(report).cell, 'clean — 1 device on 7.2.6')
 })

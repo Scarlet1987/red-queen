@@ -164,6 +164,15 @@ install says its confinement is why it cannot look, rather than reporting a host
 it never read. It is a section of the page it belongs to — one request, one
 button to read again — not another destination to navigate to.
 
+The findings that have a fix carry it as the command that clears it, with a Copy
+button and named as needing root where it does: the `modprobe` that binds a
+device whose module exists, the `rmmod` that frees an idle or ineffective load,
+the move that takes a source-less DKMS record out of `/var/lib/dkms`, and
+`sudo dkms autoinstall` for a package with no build for this kernel. A finding
+with nothing to run — hardware no module in this kernel claims, a block that is
+doing its job — offers no command rather than a guess, and the page never runs
+one itself: the sweep stays read-only.
+
 The same sweep runs as part of `npm run release:log`, so every release row
 records what the machine that made it reported: `clean — 23 devices on 7.2.6`,
 `2 warnings — unbound-hardware, dkms-not-built on 7.2.6`, or
