@@ -78,6 +78,7 @@ npm run cosg -- . --strict           # non-zero exit on any finding
 npm run cosg -- --rules              # print the loop for each pass
 npm run cosg -- . --host             # G, plus this machine's drivers and DKMS
 npm run cosg -- . --host --fix       # those fixes as a script, run nothing
+npm run cosg -- . --host --fix f --check   # what those commands cleared
 ```
 
 Every pass runs the same loop: **define the problem → select one course of
@@ -171,8 +172,20 @@ there, dated from the copy it compared with. Only warnings are kept, since a
 note needed no action when it was written and so cannot have been cleared since,
 and a copy is only compared with a sweep that could read its machine — an
 unreadable copy is replaced and said to be, rather than reported as a machine
-that lost all its faults. The sweep needs Linux sysfs and says so plainly, then
-reports nothing, elsewhere.
+that lost all its faults.
+
+`--check` is the run *after* the commands. It sweeps, compares the machine with
+the copy, and writes nothing at all — not the script, not the copy — so the same
+check can be made again after the next command lands. Every warning the copy
+recorded comes back as `gone` or `still`, with the command that was meant to
+clear it, alongside anything this sweep found that the copy never knew; the run
+exits non-zero while any of them is still there, the way `--strict` exits on any
+finding. It does not run the commands: the checker stays read-only, which is why
+the answer is "these are cleared" rather than "I cleared these". The comparison
+rides along in the JSON (`check: { comparedAt, cleared, stillThere, new, ok }`)
+and in the Markdown report, and a check with no copy to compare with is refused
+rather than quietly writing one and calling that a comparison. The sweep needs
+Linux sysfs and says so plainly, then reports nothing, elsewhere.
 
 The same sweep is what the COS-G page shows. A local install answers `/api/host`
 with a sweep of the machine it is running on, so the panel on that page reads the

@@ -14,6 +14,7 @@
 //   npm run cosg -- . --strict
 //   npm run cosg -- . --host         and the machine: drivers, blacklists, DKMS
 //   npm run cosg -- . --host --fix   the same machine's remedies, as a script
+//   npm run cosg -- . --host --fix f --check   what those commands cleared
 //
 // The checker never executes, edits or deletes the code it scans, and it never
 // runs a remedy. It only reads files, and writes a report, a fix script, or the
@@ -22,7 +23,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSyn
 import { extname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
-import { blacklistSummary, hostRuleLabels, type HostRemedy, type HostReport } from '../src/lib/host-view.ts'
+import { blacklistSummary, hostRuleLabels, type HostFinding, type HostRemedy, type HostReport } from '../src/lib/host-view.ts'
 import { extended, labels, playbooks, type Category } from './doctrine.ts'
 import { scanHost } from './host-scan.ts'
 
@@ -67,6 +68,7 @@ const hostFlag = args.includes('--host')
 const reportFlag = args.indexOf('--report')
 const reportPath = reportFlag >= 0 ? args[reportFlag + 1] : null
 const fixFlag = args.indexOf('--fix')
+const checkFlag = args.includes('--check')
 const fixValue = fixFlag >= 0 ? args[fixFlag + 1] : undefined
 // A path given to a flag is not the directory to scan, whatever it looks like.
 const flagValues = new Set([reportFlag, fixFlag].filter((index) => index >= 0).map((index) => index + 1))
@@ -88,6 +90,13 @@ const fixPath = fixFlag < 0 ? null : fixValue && !fixValue.startsWith('--') ? fi
 // be empty — or worse, invented. Refuse before scanning anything.
 if (fixPath && !hostFlag) {
   console.error('COS-G: --fix writes the host remedies, so it needs --host. Nothing was written.')
+  process.exit(2)
+}
+
+// A check compares this sweep with the copy kept beside the fix script, so it
+// needs to know which script — and the sweep that runs beside it.
+if (checkFlag && !fixPath) {
+  console.error('COS-G: --check compares this sweep with the findings kept beside the fix script, so it needs --host --fix and its path. Nothing was written.')
   process.exit(2)
 }
 
@@ -543,6 +552,13 @@ const counts = {
 const total = counts.C + counts.O + counts.S + counts.G
 const scanned = { files: files.length, dirs: dirs.length, truncated, skipped }
 
+// The check is a comparison with the findings kept beside the fix script. It is
+// worked out before the report is printed, so the report and the JSON can both
+// carry it and the run's exit code can rest on it.
+let check: { delta: Delta; current: HostFinding[] } | null = null
+/** What a fix or check run has to say, printed after the report it belongs to. */
+const notices: string[] = []
+
 function markdown(): string {
   const lines = [
     `# COS-G report`,
@@ -592,13 +608,23 @@ function markdown(): string {
       lines.push('')
     }
   }
+  if (check) {
+    lines.push(`## Check — against the findings kept ${stampOf(check.delta.at)}`, '')
+    lines.push(`${deltaCounts(check.delta)}.`, '')
+    for (const row of deltaRows(check.delta, check.current)) {
+      lines.push(`- ${row.verdict.toUpperCase()} ${labelOf(row.finding.rule)} — ${row.finding.message}`)
+      if (row.remedy) lines.push(`  - Fix: \`${row.remedy.command}\`${row.remedy.root ? ' (needs root)' : ''}`)
+    }
+    if (check.delta.cleared.length + check.delta.still.length + check.delta.added.length === 0) {
+      lines.push('The copy holds no warnings, and neither does this sweep.', '')
+    }
+    lines.push('')
+  }
   lines.push('_Read-only scan: nothing was executed, edited or deleted._', '')
   return lines.join('\n')
 }
 
-if (asJson) {
-  console.log(JSON.stringify({ root, generatedAt: new Date().toISOString(), scanned, counts, total, playbooks, host, findings }, null, 2))
-} else {
+if (!asJson) {
   console.log(`COS-G · ${root}`)
   console.log(`${scanned.files} files · ${scanned.dirs} directories${truncated ? ` (stopped at ${MAX_FILES})` : ''}`)
   console.log('Loop: define → select a course of action → test it → implement, or take it back through the cycle. (`--rules`)')
@@ -665,9 +691,11 @@ const SNAPSHOT_KIND = 'red-queen/host-findings'
 /** Which findings a later sweep found gone, new, or still there. */
 interface Delta {
   at: string
+  /** In the copy, gone now: the command written for it worked. */
   cleared: KeptFinding[]
+  /** In the copy and in this sweep: the command for it has not landed. */
+  still: KeptFinding[]
   added: KeptFinding[]
-  unchanged: number
 }
 
 const findingKey = (finding: KeptFinding) => `${finding.rule}\u0000${finding.message}`
@@ -738,9 +766,36 @@ function compareFindings(before: KeptFinding[], after: KeptFinding[], at: string
   return {
     at,
     cleared: before.filter((finding) => !now.has(findingKey(finding))),
+    still: after.filter((finding) => then.has(findingKey(finding))),
     added: after.filter((finding) => !then.has(findingKey(finding))),
-    unchanged: after.filter((finding) => then.has(findingKey(finding))).length,
   }
+}
+
+/** The command this sweep would run for a finding the copy remembers. */
+function remedyFor(finding: KeptFinding, current: HostFinding[]): HostRemedy | undefined {
+  return current.find((entry) => entry.rule === finding.rule && entry.message === finding.message)?.remedy
+}
+
+/** One row of the comparison, in the order a check is read: gone, still, new. */
+interface DeltaRow {
+  verdict: 'gone' | 'still' | 'new'
+  finding: KeptFinding
+  remedy?: HostRemedy
+}
+
+function deltaRows(delta: Delta, current: HostFinding[]): DeltaRow[] {
+  return [
+    ...delta.cleared.map((finding) => ({ verdict: 'gone' as const, finding })),
+    // A finding still there carries the command that was meant to clear it, so
+    // the check points at one line to look at rather than at the whole script.
+    ...delta.still.map((finding) => ({ verdict: 'still' as const, finding, remedy: remedyFor(finding, current) })),
+    ...delta.added.map((finding) => ({ verdict: 'new' as const, finding, remedy: remedyFor(finding, current) })),
+  ]
+}
+
+/** The counts, as one clause, for the console, the script and the report. */
+function deltaCounts(delta: Delta): string {
+  return `${delta.cleared.length} cleared, ${delta.still.length} still there, ${delta.added.length} new`
 }
 
 /**
@@ -769,11 +824,7 @@ function fixScript(report: HostReport, delta: Delta | null): string {
   lines.push(`# ${warnings.length} warning${warnings.length === 1 ? '' : 's'} on kernel ${report.kernel} · ${runnable.length} with a command`)
   // What changed since the copy this was built against, so the script says what
   // the last run's commands did rather than only what is left.
-  if (delta) {
-    lines.push(
-      `# Since ${stampOf(delta.at)}: ${delta.cleared.length} cleared, ${delta.added.length} new, ${delta.unchanged} unchanged.`,
-    )
-  }
+  if (delta) lines.push(`# Since ${stampOf(delta.at)}: ${deltaCounts(delta)}.`)
   lines.push('set -eu', '')
   for (const finding of runnable) {
     lines.push(`# ${hostRuleLabels[finding.rule]} — ${finding.message}`, finding.remedy?.command ?? '', '')
@@ -789,11 +840,6 @@ function fixScript(report: HostReport, delta: Delta | null): string {
   return lines.join('\n')
 }
 
-if (reportPath) {
-  writeFileSync(resolve(process.cwd(), reportPath), markdown())
-  if (!asJson) console.log(`Report written to ${reportPath}.`)
-}
-
 if (fixPath && host) {
   const scriptTarget = resolve(process.cwd(), fixPath)
   // Beside the script, under the same name: the two are read together, and a
@@ -802,35 +848,90 @@ if (fixPath && host) {
   const keptLabel = fixPath.replace(/\.[^./\\]*$/, '') + '.json'
   const present = existsSync(keptTarget)
   const before = present ? readSnapshot(keptTarget) : null
-  // Only two readable sweeps can be compared: a copy from a machine that could
-  // not be read says nothing about what has changed on one that can.
-  const delta = before && before.available && host.available ? compareFindings(before.findings, keptFindings(host), before.generatedAt) : null
 
-  writeFileSync(scriptTarget, fixScript(host, delta))
-  if (!asJson) console.log(`Fixes written to ${fixPath}. Nothing in it has been run.`)
-
-  if (host.available) {
-    const snapshot = { program: 'Red Queen', kind: SNAPSHOT_KIND, generatedAt: new Date().toISOString(), kernel: host.kernel, available: true, findings: keptFindings(host) }
-    writeFileSync(keptTarget, JSON.stringify(snapshot, null, 2) + '\n')
-    if (asJson) {
-      // Nothing to say on a JSON run: the answer is the JSON.
-    } else if (delta && (delta.cleared.length > 0 || delta.added.length > 0)) {
-      console.log(`Findings kept in ${keptLabel}.`)
-      console.log(`  since   ${stampOf(delta.at)} · ${delta.cleared.length} cleared, ${delta.added.length} new, ${delta.unchanged} unchanged`)
-      for (const finding of delta.cleared) console.log(`  gone    ${labelOf(finding.rule)} — ${finding.message}`)
-      for (const finding of delta.added) console.log(`  new     ${labelOf(finding.rule)} — ${finding.message}`)
-    } else if (delta) {
-      console.log(`Findings kept in ${keptLabel}.`)
-      console.log(`  since   ${stampOf(delta.at)} · nothing changed: ${delta.unchanged} warning${delta.unchanged === 1 ? '' : 's'} as before`)
-    } else if (present) {
-      console.log(`Findings kept in ${keptLabel}. The copy already there could not be read, so nothing here is compared with it.`)
-    } else {
-      console.log(`Findings kept in ${keptLabel}, for a later run to compare against.`)
+  if (checkFlag) {
+    // A check writes nothing, so the copy from before the commands is still
+    // there to check against again after the next one lands.
+    if (!host.available) {
+      console.error(`COS-G: nothing to check against: this sweep could not read the machine (${host.reason}). Nothing was written.`)
+      process.exit(2)
     }
-  } else if (!asJson) {
-    console.log('The sweep could not read this machine, so there were no findings to keep.')
+    if (!before || !before.available) {
+      console.error(
+        present
+          ? `COS-G: nothing to check against: the findings kept in ${keptLabel} could not be read. Nothing was written.`
+          : `COS-G: nothing to check against: nothing is kept at ${keptLabel}. Run --host --fix first.`,
+      )
+      process.exit(2)
+    }
+
+    const delta = compareFindings(before.findings, keptFindings(host), before.generatedAt)
+    check = { delta, current: host.findings }
+    notices.push(`Check — against the findings kept ${stampOf(delta.at)}`)
+    for (const row of deltaRows(delta, host.findings)) {
+      notices.push(`  ${row.verdict.padEnd(7)}${labelOf(row.finding.rule)} — ${row.finding.message}`)
+      if (row.remedy) notices.push(`        fix: ${row.remedy.command}${row.remedy.root ? ' (needs root)' : ''}`)
+    }
+    notices.push(`  ${deltaCounts(delta)}.`)
+    notices.push('  Nothing was written: the copy is still there to check against again.')
+    notices.push('')
+  } else {
+    // Only two readable sweeps can be compared: a copy from a machine that could
+    // not be read says nothing about what has changed on one that can.
+    const delta = before && before.available && host.available ? compareFindings(before.findings, keptFindings(host), before.generatedAt) : null
+
+    writeFileSync(scriptTarget, fixScript(host, delta))
+    notices.push(`Fixes written to ${fixPath}. Nothing in it has been run.`)
+
+    if (!host.available) {
+      notices.push('The sweep could not read this machine, so there were no findings to keep.')
+    } else {
+      const snapshot = { program: 'Red Queen', kind: SNAPSHOT_KIND, generatedAt: new Date().toISOString(), kernel: host.kernel, available: true, findings: keptFindings(host) }
+      writeFileSync(keptTarget, JSON.stringify(snapshot, null, 2) + '\n')
+      if (delta && (delta.cleared.length > 0 || delta.added.length > 0)) {
+        notices.push(`Findings kept in ${keptLabel}.`)
+        notices.push(`  since   ${stampOf(delta.at)} · ${deltaCounts(delta)}`)
+        // The script below already lists what is still there; what this adds is
+        // what moved since the copy, which is what a second run is for.
+        for (const row of deltaRows(delta, host.findings)) {
+          if (row.verdict !== 'still') notices.push(`  ${row.verdict.padEnd(7)}${labelOf(row.finding.rule)} — ${row.finding.message}`)
+        }
+      } else if (delta) {
+        notices.push(`Findings kept in ${keptLabel}.`)
+        notices.push(`  since   ${stampOf(delta.at)} · nothing changed: ${delta.still.length} warning${delta.still.length === 1 ? '' : 's'} as before`)
+      } else if (present) {
+        notices.push(`Findings kept in ${keptLabel}. The copy already there could not be read, so nothing here is compared with it.`)
+      } else {
+        notices.push(`Findings kept in ${keptLabel}, for a later run to compare against.`)
+      }
+    }
   }
 }
 
+if (asJson) {
+  // The JSON is printed after the fixes and the check are known, since a check
+  // run's verdict is part of what this run has to report.
+  const verdict = check
+    ? {
+        comparedAt: check.delta.at,
+        cleared: check.delta.cleared.length,
+        stillThere: check.delta.still.length,
+        new: check.delta.added.length,
+        ok: check.delta.still.length === 0,
+      }
+    : null
+  console.log(JSON.stringify({ root, generatedAt: new Date().toISOString(), scanned, counts, total, playbooks, host, findings, check: verdict }, null, 2))
+}
+
+if (reportPath) {
+  writeFileSync(resolve(process.cwd(), reportPath), markdown())
+  if (!asJson) console.log(`Report written to ${reportPath}.`)
+}
+
+if (!asJson) for (const notice of notices) console.log(notice)
+
 const failedSyntax = counts.S > 0
-process.exit(failedSyntax || (strict && total > 0) ? 1 : 0)
+// A check is a verdict, so it fails while anything it was aimed at is still
+// there — the non-zero exit --strict gives any finding, for the one run that
+// asked whether the commands worked. It never runs them itself.
+process.exit(failedSyntax || (strict && total > 0) || (check !== null && check.delta.still.length > 0) ? 1 : 0)

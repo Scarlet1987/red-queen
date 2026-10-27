@@ -685,7 +685,7 @@ test('a kept copy from an earlier run says what has changed since', () => {
 
   const run = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
   assert.equal(run.status, 0, run.stderr)
-  const counts = `1 cleared, ${warnings.length} new, 0 unchanged`
+  const counts = `1 cleared, 0 still there, ${warnings.length} new`
   assert.ok(
     run.stdout.includes(`  since   2026-01-02 03:04 · ${counts}`),
     `the console dates the comparison: ${run.stdout.split('\n').find((line) => line.includes('since')) ?? 'no since line'}`,
@@ -693,10 +693,11 @@ test('a kept copy from an earlier run says what has changed since', () => {
   assert.match(run.stdout, /gone\s+Driver doing nothing — ghost-driver is loaded but driving nothing here/)
   assert.ok(readFileSync(script, 'utf8').includes(`# Since 2026-01-02 03:04: ${counts}.`), 'the script carries the comparison too')
   // Every warning this machine does have is named as new against that copy, by
-  // rule and message rather than by a bare count.
+  // rule and message rather than by a bare count. The verdict is padded to seven
+  // so the messages line up under each other.
   for (const finding of warnings) {
     const label = hostRuleLabels[finding.rule as keyof typeof hostRuleLabels]
-    assert.ok(run.stdout.includes(`  new     ${label} — ${finding.message}`), `the delta names it as new: ${finding.message}`)
+    assert.ok(run.stdout.includes(`  ${'new'.padEnd(7)}${label} — ${finding.message}`), `the delta names it as new: ${finding.message}`)
   }
 
   // The copy is replaced, so the next run compares against this one rather than
@@ -723,4 +724,121 @@ test('a kept copy that cannot be read is replaced without a claimed comparison',
   assert.ok(!/^  since {3}/m.test(run.stdout), 'an unreadable copy invents no comparison')
   const replaced = JSON.parse(readFileSync(kept, 'utf8')) as { kind: string }
   assert.equal(replaced.kind, 'red-queen/host-findings', 'the unreadable copy is replaced with a readable one')
+})
+
+/** A throwaway directory for a fix script and its copy: never the scanned tree. */
+function fixOut(prefix: string): string {
+  const out = mkdtempSync(join(tmpdir(), prefix))
+  scratch.push(out)
+  return out
+}
+
+/** The copy beside a script, derived the way the CLI derives it. */
+function keptOf(script: string): string {
+  return script.replace(/\.[^./\\]*$/, '') + '.json'
+}
+
+function check(root: string, script: string, extra: string[] = []): { status: number | null; stdout: string; stderr: string } {
+  return spawnSync(process.execPath, [cli, root, '--host', '--fix', script, '--check', ...extra], { cwd: repo, encoding: 'utf8' })
+}
+
+test('a check says what the commands cleared, and fails while any of it is still there', () => {
+  requireHostSweep()
+  const root = plainProject('red-queen-check-')
+  const out = fixOut('red-queen-check-out-')
+  const script = join(out, 'fixes.sh')
+  const kept = join(out, 'fixes.json')
+  const warnings = currentWarnings(root)
+  assert.ok(warnings.length > 0, 'this test needs a machine with something to check against')
+
+  const fix = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(fix.status, 0, fix.stderr)
+  const scriptBefore = readFileSync(script, 'utf8')
+
+  // Nothing has been run, so every kept warning is still there — which is the
+  // answer the check exists to give, and it fails rather than reporting a pass.
+  const first = check(root, script)
+  assert.equal(first.status, 1, 'a check fails while a kept warning is still there')
+  assert.match(first.stdout, /^Check — against the findings kept \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/m)
+  assert.match(first.stdout, new RegExp(`  0 cleared, ${warnings.length} still there, 0 new\\.`))
+  for (const warning of warnings) {
+    const label = hostRuleLabels[warning.rule as keyof typeof hostRuleLabels]
+    assert.ok(first.stdout.includes(`  still  ${label} — ${warning.message}`), `the check names it as still there: ${warning.message}`)
+    if (warning.remedy) {
+      assert.ok(
+        first.stdout.includes(`        fix: ${warning.remedy.command}`),
+        'a still-there warning carries the command that was meant to clear it',
+      )
+    }
+  }
+  assert.equal(readFileSync(script, 'utf8'), scriptBefore, 'a check rewrites no script')
+
+  // The copy is the before and this sweep is the after, so a cleared finding can
+  // only be one the copy remembers and the machine no longer has: a copy with a
+  // ghost in it is a machine where that command worked.
+  const copy = JSON.parse(readFileSync(kept, 'utf8')) as { findings: unknown[] }
+  const ghost = { rule: 'idle-driver', severity: 'warn', message: 'ghost-driver is loaded but driving nothing here — from the copy made weeks ago.' }
+  writeFileSync(kept, JSON.stringify({ ...copy, findings: [...copy.findings, ghost] }, null, 2) + '\n')
+  const partly = check(root, script)
+  assert.equal(partly.status, 1, 'the rest are still there, so the check still fails')
+  assert.ok(
+    partly.stdout.includes(`  1 cleared, ${warnings.length} still there, 0 new.`),
+    partly.stdout.split('\n').find((line) => line.includes('cleared,')) ?? 'no counts line',
+  )
+  assert.ok(partly.stdout.includes(`  gone   ${hostRuleLabels['idle-driver']} — ${ghost.message}`), 'the cleared one is named as gone')
+
+  // A copy every one of whose findings is gone from the machine: the check
+  // passes, even though this sweep has warnings the copy never knew about — the
+  // question it answers is whether the commands it was written for worked.
+  writeFileSync(kept, JSON.stringify({ ...copy, findings: [ghost] }, null, 2) + '\n')
+  const clean = check(root, script)
+  assert.equal(clean.status, 0, 'a check passes when nothing the copy held is still there')
+  assert.ok(clean.stdout.includes(`  1 cleared, 0 still there, ${warnings.length} new.`))
+})
+
+test('a check with nothing to check against is refused, and writes nothing', () => {
+  requireHostSweep()
+  const root = plainProject('red-queen-check-none-')
+  const out = fixOut('red-queen-check-none-out-')
+  const script = join(out, 'fixes.sh')
+
+  // Without --fix there is no script to find a copy beside.
+  const withoutFix = spawnSync(process.execPath, [cli, root, '--host', '--check'], { cwd: repo, encoding: 'utf8' })
+  assert.equal(withoutFix.status, 2)
+  assert.match(withoutFix.stderr, /needs --host --fix/)
+
+  // And with a path but nothing kept there, a check has nothing to compare with,
+  // so it refuses rather than writing a fresh copy and calling it a comparison.
+  const nothingKept = check(root, script)
+  assert.equal(nothingKept.status, 2)
+  assert.match(nothingKept.stderr, /nothing is kept at/)
+  assert.ok(!existsSync(script), 'a refused check writes no script')
+  assert.ok(!existsSync(keptOf(script)), 'and keeps no findings')
+})
+
+test('a check is carried in the JSON and in the report when both are asked for', () => {
+  requireHostSweep()
+  const root = plainProject('red-queen-check-forms-')
+  const out = fixOut('red-queen-check-forms-out-')
+  const script = join(out, 'fixes.sh')
+  const warnings = currentWarnings(root)
+
+  const fix = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(fix.status, 0, fix.stderr)
+
+  const json = check(root, script, ['--json'])
+  const payload = JSON.parse(json.stdout) as { check: { cleared: number; stillThere: number; new: number; ok: boolean; comparedAt: string } | null }
+  assert.deepEqual(
+    payload.check && { cleared: payload.check.cleared, stillThere: payload.check.stillThere, new: payload.check.new, ok: payload.check.ok },
+    { cleared: 0, stillThere: warnings.length, new: 0, ok: false },
+    'the verdict a script would read is in the JSON',
+  )
+  assert.match(payload.check?.comparedAt ?? '', /^\d{4}-\d{2}-\d{2}T/, 'and says which copy it compared with')
+
+  const reportFile = join(out, 'check.md')
+  const withReport = check(root, script, ['--report', reportFile])
+  assert.equal(withReport.status, 1)
+  const markdown = readFileSync(reportFile, 'utf8')
+  assert.match(markdown, /## Check — against the findings kept \d{4}-\d{2}-\d{2} \d{2}:\d{2}/)
+  assert.equal((markdown.match(/^- STILL /gm) ?? []).length, warnings.length, 'the report carries the comparison it just made')
 })
