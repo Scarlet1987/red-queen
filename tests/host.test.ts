@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, test } from 'node:test'
@@ -500,28 +500,39 @@ test('a machine the sweep could not read summarises as unavailable, not clean', 
   assert.equal(summarizeHost(scan(root)).cell, 'unavailable — no sysfs')
 })
 
-test('--host adds the machine to the report and does not fail the run', () => {
-  const root = mkdtempSync(join(tmpdir(), 'red-queen-host-cli-'))
+/** What the CLI's JSON carries for a remedy, and what a test reads back. */
+interface CliRemedy {
+  command: string
+  root: boolean
+}
+
+interface CliFinding {
+  rule: string
+  severity: string
+  message: string
+  remedy?: CliRemedy
+}
+
+/** A scan of a throwaway project with only a source file to find. */
+function plainProject(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix))
   scratch.push(root)
   writeFileSync(join(root, '.gitignore'), 'node_modules\n')
   mkdirSync(join(root, 'src'), { recursive: true })
   writeFileSync(join(root, 'src', 'main.ts'), 'export const answer = 42\n')
+  return root
+}
+
+test('--host adds the machine to the report and does not fail the run', () => {
+  const root = plainProject('red-queen-host-cli-')
 
   const result = spawnSync(process.execPath, [cli, root, '--json', '--host'], { cwd: repo, encoding: 'utf8' })
   assert.ok(result.stdout, `COS-G printed no JSON. stderr: ${result.stderr}`)
-  interface Remedy {
-    command: string
-    root: boolean
-  }
-  interface ReportedFinding {
-    rule: string
-    remedy?: Remedy
-  }
   const report = JSON.parse(result.stdout) as {
     total: number
     counts: { G: number }
-    host: { available: boolean; devices: unknown[]; findings: ReportedFinding[] } | null
-    findings: { G: ReportedFinding[] }
+    host: { available: boolean; devices: unknown[]; findings: CliFinding[] } | null
+    findings: { G: CliFinding[] }
   }
   assert.equal(result.status, 0, 'host findings are warnings, not a failing exit')
   assert.ok(report.host, 'the report carries a host section when asked for one')
@@ -551,4 +562,53 @@ test('--host adds the machine to the report and does not fail the run', () => {
   assert.ok(printed.stdout, `COS-G printed no report. stderr: ${printed.stderr}`)
   assert.equal((printed.stdout.match(/^\s+fix: /gm) ?? []).length, carried, 'the console prints one fix line per remedy')
   assert.equal((readFileSync(reportFile, 'utf8').match(/^  - Fix: /gm) ?? []).length, carried, 'the Markdown report prints one fix line per remedy')
+})
+
+test('--fix writes the remedies as a script, and refuses without --host', () => {
+  const root = plainProject('red-queen-fix-')
+
+  // The remedies come from the sweep, so without --host there is no machine to
+  // have any: the run stops rather than writing a script that could only be
+  // empty, or worse, invented.
+  const refused = spawnSync(process.execPath, [cli, root, '--fix'], { cwd: repo, encoding: 'utf8' })
+  assert.equal(refused.status, 2, 'a fix script without a machine to sweep is refused')
+  assert.match(refused.stderr, /needs --host/)
+  assert.ok(!existsSync(join(repo, 'cosg-fixes.sh')), 'nothing is written when the run is refused')
+
+  // What the report says about this machine is what the script has to carry.
+  const json = spawnSync(process.execPath, [cli, root, '--json', '--host'], { cwd: repo, encoding: 'utf8' })
+  assert.ok(json.stdout, `COS-G printed no JSON. stderr: ${json.stderr}`)
+  const report = JSON.parse(json.stdout) as { host: { findings: CliFinding[] } }
+  const remedies = report.host.findings.flatMap((finding) => (finding.remedy ? [finding.remedy.command] : []))
+
+  const script = join(root, 'fixes.sh')
+  const written = spawnSync(process.execPath, [cli, root, '--host', '--fix', script], { cwd: repo, encoding: 'utf8' })
+  assert.equal(written.status, 0, written.stderr)
+  assert.match(written.stdout, /Fixes written to /)
+
+  const text = readFileSync(script, 'utf8')
+  assert.ok(text.startsWith('#!/bin/sh\n'), 'the script is meant for a shell')
+  // The commands are the remedies and nothing else. A line nothing read would be
+  // a line someone could run, which is the one thing a written file must not be.
+  const commands = text.split('\n').filter((line) => line.length > 0 && !line.startsWith('#'))
+  assert.deepEqual(commands, ['set -eu', ...remedies])
+  // A warning no command clears is named in the file rather than dropped from it,
+  // so the script accounts for the sweep it came from.
+  for (const finding of report.host.findings) {
+    if (finding.severity !== 'warn' || finding.remedy) continue
+    assert.ok(text.includes(finding.message), `the script accounts for: ${finding.message}`)
+  }
+})
+
+test('--fix without a path lands beside the report, under one name', () => {
+  const root = plainProject('red-queen-fix-beside-')
+  mkdirSync(join(root, 'reports'), { recursive: true })
+  const reportFile = join(root, 'reports', 'cosg.md')
+
+  const run = spawnSync(process.execPath, [cli, root, '--host', '--report', reportFile, '--fix'], { cwd: repo, encoding: 'utf8' })
+  assert.equal(run.status, 0, run.stderr)
+  assert.match(run.stdout, /Report written to /)
+  // The report and the script are read together, so they are written together.
+  assert.ok(existsSync(join(root, 'reports', 'cosg.sh')), 'the script sits beside the report')
+  assert.match(run.stdout, /Fixes written to .*cosg\.sh\. Nothing in it has been run\./)
 })

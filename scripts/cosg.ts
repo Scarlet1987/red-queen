@@ -13,14 +13,16 @@
 //   npm run cosg -- . --report cosg-report.md
 //   npm run cosg -- . --strict
 //   npm run cosg -- . --host         and the machine: drivers, blacklists, DKMS
+//   npm run cosg -- . --host --fix   the same machine's remedies, as a script
 //
-// The checker never executes, edits or deletes the code it scans. It only
-// reads files, and writes a report when you ask for one.
+// The checker never executes, edits or deletes the code it scans, and it never
+// runs a remedy. It only reads files, and writes a report or a fix script when
+// you ask for one.
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
-import { blacklistSummary, type HostRemedy, type HostReport } from '../src/lib/host-view.ts'
+import { blacklistSummary, hostRuleLabels, type HostRemedy, type HostReport } from '../src/lib/host-view.ts'
 import { extended, labels, playbooks, type Category } from './doctrine.ts'
 import { scanHost } from './host-scan.ts'
 
@@ -59,13 +61,35 @@ const MAX_FINDINGS = 40
 const SELF = 'scripts/cosg.ts'
 
 const args = process.argv.slice(2)
-const target = args.find((arg) => !arg.startsWith('--') && args[args.indexOf(arg) - 1] !== '--report') ?? '.'
 const asJson = args.includes('--json')
 const strict = args.includes('--strict')
 const hostFlag = args.includes('--host')
 const reportFlag = args.indexOf('--report')
 const reportPath = reportFlag >= 0 ? args[reportFlag + 1] : null
+const fixFlag = args.indexOf('--fix')
+const fixValue = fixFlag >= 0 ? args[fixFlag + 1] : undefined
+// A path given to a flag is not the directory to scan, whatever it looks like.
+const flagValues = new Set([reportFlag, fixFlag].filter((index) => index >= 0).map((index) => index + 1))
+const target = args.find((arg, index) => !arg.startsWith('--') && !flagValues.has(index)) ?? '.'
 const root = resolve(process.cwd(), target)
+
+/**
+ * The script beside the report when one was asked for — they are read together —
+ * and a named file in the working directory otherwise.
+ */
+function defaultFixPath(report: string | null): string {
+  const base = report ? report.replace(/\.[^./\\]*$/, '') : 'cosg-fixes'
+  return `${base}.sh`
+}
+
+const fixPath = fixFlag < 0 ? null : fixValue && !fixValue.startsWith('--') ? fixValue : defaultFixPath(reportPath)
+
+// The remedies come from the sweep, so a fix script without `--host` could only
+// be empty — or worse, invented. Refuse before scanning anything.
+if (fixPath && !hostFlag) {
+  console.error('COS-G: --fix writes the host remedies, so it needs --host. Nothing was written.')
+  process.exit(2)
+}
 
 if (args.includes('--rules')) {
   console.log('COS-G rules')
@@ -615,9 +639,56 @@ if (asJson) {
   if (truncated) console.log(`Stopped after ${MAX_FILES} files; point COS-G at a narrower directory for a full pass.`)
 }
 
+/**
+ * The host remedies as a shell script. Written, never run: the sweep reads the
+ * machine, and these commands change it, so the file is something to read first
+ * — which is also why every line says what it is for and what it needs.
+ */
+function fixScript(report: HostReport): string {
+  const lines = [
+    '#!/bin/sh',
+    "# Red Queen — the commands that clear this machine's host findings.",
+    '#',
+    '# Written by: npm run cosg -- . --host --fix',
+    '# Nothing here has been run. The sweep only reads the machine, so read this',
+    '# before pasting anything out of it; set -e stops at the first failure.',
+    '#',
+  ]
+  if (!report.available) {
+    lines.push(`# The sweep could not read this machine: ${report.reason}`, '# Nothing to run.', 'set -eu', '')
+    return lines.join('\n')
+  }
+
+  const warnings = report.findings.filter((finding) => finding.severity === 'warn')
+  const runnable = warnings.filter((finding) => finding.remedy)
+  const manual = warnings.filter((finding) => !finding.remedy)
+  lines.push(
+    `# ${warnings.length} warning${warnings.length === 1 ? '' : 's'} on kernel ${report.kernel} · ${runnable.length} with a command`,
+    'set -eu',
+    '',
+  )
+  for (const finding of runnable) {
+    lines.push(`# ${hostRuleLabels[finding.rule]} — ${finding.message}`, finding.remedy?.command ?? '', '')
+  }
+  // A warning nothing can fix is named rather than dropped: the file accounts
+  // for the sweep, so a missing command does not read as a missing finding.
+  if (manual.length > 0) {
+    lines.push('# No command clears these — they need a decision rather than a paste:', '#')
+    for (const finding of manual) lines.push(`#   ${hostRuleLabels[finding.rule]} — ${finding.message}`)
+    lines.push('')
+  }
+  if (runnable.length === 0) lines.push('# Nothing to run: no warning on this machine has a command.')
+  return lines.join('\n')
+}
+
 if (reportPath) {
   writeFileSync(resolve(process.cwd(), reportPath), markdown())
   if (!asJson) console.log(`Report written to ${reportPath}.`)
+}
+
+if (fixPath && host) {
+  writeFileSync(resolve(process.cwd(), fixPath), fixScript(host))
+  if (!asJson) console.log(`Fixes written to ${fixPath}. Nothing in it has been run.`)
 }
 
 const failedSyntax = counts.S > 0

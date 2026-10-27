@@ -156,8 +156,13 @@ warnings, so `--host` never fails a build — `--strict` is the exception. A
 finding with a fix prints the command for it, as a `fix:` line under the finding
 in the console and a `Fix:` line in the Markdown report — the same command the
 COS-G page offers beside its Copy button, so the terminal and the page hand over
-one thing rather than two. The sweep needs Linux sysfs and says so plainly, then
-reports nothing, elsewhere.
+one thing rather than two. `--fix` writes those commands out as a shell script
+instead — beside the report when one was asked for — with the finding each one
+clears above it, and the warnings no command clears named at the end rather than
+left out. The file is written, never run: the sweep reads the machine, and this
+is what changes it. `--fix` without `--host` is refused, since there would be no
+sweep behind it. The sweep needs Linux sysfs and says so plainly, then reports
+nothing, elsewhere.
 
 The same sweep is what the COS-G page shows. A local install answers `/api/host`
 with a sweep of the machine it is running on, so the panel on that page reads the
