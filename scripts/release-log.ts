@@ -454,6 +454,22 @@ export async function record(input: RecordInput, options: RecordOptions = {}): P
   }
 }
 
+/**
+ * The warnings behind a host cell, as the log prints them: the finding, then the
+ * command that clears it. A release is the machine's record as much as the
+ * site's, so the fix is written down beside the fault instead of being left in a
+ * script nobody opened. The row keeps its one-line cell; these are the run's
+ * output, where a warning is read at the moment it is recorded.
+ */
+export function warningLines(warnings: HostFinding[]): string[] {
+  const lines: string[] = []
+  for (const warning of warnings) {
+    lines.push(`          warn  ${warning.message}`)
+    if (warning.remedy) lines.push(`                fix: ${warning.remedy.command}${warning.remedy.root ? ' (needs root)' : ''}`)
+  }
+  return lines
+}
+
 function display(path: string): string {
   const inside = relative(ROOT, path)
   return inside && !inside.startsWith('..') ? inside : path
@@ -515,9 +531,10 @@ if (invokedDirectly) {
       console.log(`  target  ${result.url}`)
       console.log(`  result  ${passed}/${result.checks.length} checks passed in ${((performance.now() - started) / 1000).toFixed(1)} s`)
       console.log(`  host    ${result.host}`)
-      // The cell says how many; this says which, so the warning is readable at
-      // the moment it is written down rather than only from RELEASES.md.
-      for (const warning of result.warnings) console.log(`          warn  ${warning.message}`)
+      // The cell says how many; this says which, and what clears each one, so a
+      // warning is readable at the moment it is written down rather than only
+      // from RELEASES.md.
+      for (const line of warningLines(result.warnings)) console.log(line)
       const where = display(result.logPath)
       if (result.written) {
         console.log(`  logged  ${where} (${result.replaced ? 'updated the existing row' : 'new row at the top'})`)

@@ -210,9 +210,12 @@ records what the machine that made it reported: `clean — 23 devices on 7.2.6`,
 `2 warnings — unbound-hardware, dkms-not-built on 7.2.6`, or
 `unavailable — no sysfs`. The kernel is in the cell because "not built for the
 running kernel" means nothing without it, months later. The warnings themselves
-print during the log and stay in the row; `release:check` refuses a row that is
-blank there, since a release whose host was never looked at is not the whole
-story of what shipped.
+print during the log and stay in the row, and each one prints with the command
+that clears it — the same command the COS-G page offers and its report writes,
+so the machine's faults and their fixes are recorded in the same breath. The row
+keeps its one-line cell: `release:check` refuses a row that is blank there, since
+a release whose host was never looked at is not the whole story of what shipped,
+and a column of `sudo` commands is not a table.
 
 ### Worksheet
 

@@ -20,6 +20,7 @@ import {
   statusFor,
   TAG_UNKNOWN,
   verifyLog,
+  warningLines,
   withStatus,
 } from '../scripts/release-log.ts'
 import type { HostFinding, HostReport } from '../scripts/host-scan.ts'
@@ -518,6 +519,47 @@ test('a dry run prepares the row and leaves the log alone', async () => {
     assert.equal(readFileSync(logPath, 'utf8'), before, 'the log is byte-identical after a dry run')
     assert.match(result.row, /^\| 2026-10-25 09:00 \| preview \| `935e02c6b357` — 1\.0\.0, built 21:13 \| v1\.0\.0 \|/)
     assert.ok(result.row.includes(`| ${SUITE.length}/${SUITE.length} | ${MADE} |`), 'the row names every check, ready to be written')
+  } finally {
+    cleanup()
+  }
+})
+
+test('each logged warning carries the command that clears it', async () => {
+  const { root, logPath, cleanup } = recordable()
+  try {
+    const before = readFileSync(logPath, 'utf8')
+    const complaint: HostFinding = {
+      rule: 'dkms-not-built',
+      severity: 'warn',
+      message: 'DKMS module nvidia is built for 7.1.5 but not for 7.2.6.',
+      remedy: { command: 'sudo dkms autoinstall', root: true },
+    }
+    const silent: HostFinding = {
+      rule: 'unbound-hardware',
+      severity: 'warn',
+      message: '0000:01:00.0 has no driver bound and no module in 7.2.6 claims it.',
+    }
+    const result = await record(
+      { environment: 'preview', at: '2026-10-25 09:00', dryRun: true },
+      { root, run: async () => suiteChecks(), scan: () => host([complaint, silent]) },
+    )
+
+    // The remedy travels from the sweep to the log run untouched, so the command
+    // printed below is the one COS-G would hand over for the same finding.
+    assert.deepEqual(result.warnings.map((warning) => warning.remedy), [{ command: 'sudo dkms autoinstall', root: true }, undefined])
+
+    // The lines the run prints: the fault, then the fix under it. A warning with
+    // nothing to run prints no fix line rather than an empty one.
+    assert.deepEqual(warningLines(result.warnings), [
+      '          warn  DKMS module nvidia is built for 7.1.5 but not for 7.2.6.',
+      '                fix: sudo dkms autoinstall (needs root)',
+      '          warn  0000:01:00.0 has no driver bound and no module in 7.2.6 claims it.',
+    ])
+
+    // The row itself is unchanged by any of this: the commands are the run's
+    // output, and the cell stays one line.
+    assert.equal(readFileSync(logPath, 'utf8'), before, 'a dry run still writes nothing')
+    assert.ok(result.row.includes(`| ${result.host} |`), 'the cell the row carries is the summary, not the commands')
   } finally {
     cleanup()
   }
